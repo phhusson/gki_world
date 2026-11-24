@@ -88,6 +88,9 @@ global module. Duplicate module names are a hard load failure on device.
 - Matrix: the two current LTS releases (6.12 and its successor), current stable,
   and torvalds master. The concrete list lives in
   [`targets.yaml`](../targets.yaml).
+- Required builds: every new contribution MUST build against the newest LTS and
+  the newest release (`required: true` in `targets.yaml`). The N-1 LTS and
+  master are tracked and built by CI, but they do not block a merge.
 - A layer MAY narrow `targets:` in its `layer.yaml` (for example a driver only
   needed on 6.18+). It MUST NOT widen beyond the global set.
 - No compatibility shims. Version differences are handled with
@@ -395,9 +398,11 @@ is an optional extra when logs outgrow a tty.
 
 Two builds, with different jobs:
 
-1. **Per-device build.** The device's stack, for each of its targets, all
-   gki_world modules `=m`. This is the shipping shape and the only build that
-   proves a device.
+1. **Per-device build.** The device's stack, all gki_world modules `=m`. At
+   minimum every `required: true` target (newest LTS and newest release) is
+   built for a PR; the remaining declared targets run nightly and are advisory
+   for merge. This is the shipping shape and the only build that proves a
+   device.
 2. **Universe compile.** Every layer, every target, every module `=m`, no device
    selected. This exists only to catch shared-tree breakage and header drift. It
    never ships, and booting it is explicitly not required.
@@ -440,7 +445,8 @@ A PR merges without human review when all of these hold:
 
 - the author is a maintainer of every layer the PR touches, or the PR creates a
   new device directory;
-- per-device builds, linter, provenance and evidence checks pass;
+- per-device builds for the required targets (newest LTS and newest release),
+  the linter, provenance and evidence checks pass;
 - AI review passes;
 - for a device change, `status: boots` with evidence at the PR head.
 

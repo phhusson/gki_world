@@ -14,7 +14,8 @@ A device entry is mergeable when:
 
 - `device/<oem>/<codename>/` validates (`layer.yaml`, config fragment, DTS,
   `bootimg.yaml`, `PROVENANCE` for any forks);
-- the per-device build passes for every declared target;
+- the per-device build passes for the required targets (newest LTS and newest
+  release) and SHOULD pass for the rest;
 - the collision linter passes against the nightly index;
 - `status: boots` and `boots_sha` match the PR head;
 - the evidence bundle below was produced from that exact build.

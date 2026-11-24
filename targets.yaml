@@ -10,6 +10,7 @@ targets:
 
   - id: "6.18"
     kind: lts
+    required: true
     repo: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
     ref: linux-6.18.y
 
@@ -17,6 +18,7 @@ targets:
   # newest vX.Y tag at build time; this file is updated when the window moves.
   - id: stable
     kind: release
+    required: true
     repo: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
     ref: latest-tag
 

@@ -34,6 +34,10 @@ The floor is the N-1 LTS (6.12 at the time of writing). The matrix is the two
 current LTS releases, current stable, and torvalds master. Version differences
 are handled with `#if LINUX_VERSION_CODE` in the driver, not with a shim layer.
 
+New contributions must build against the newest LTS and the newest release
+(`required: true` in `targets.yaml`). The older LTS and master are tracked but
+do not block a merge.
+
 ## Machine-readable metadata
 
 - [`docs/schemas/layer.schema.json`](docs/schemas/layer.schema.json) — every
@@ -68,6 +72,17 @@ usable while the new one is brought up:
 
 ```sh
 make KERNEL_REF=linux-6.20.y
+```
+
+The rest of the matrix is buildable the same way; each ref gets its own
+`.kernel/<ref>` checkout:
+
+```sh
+make KERNEL_REF=linux-6.12.y   # N-1 LTS
+make latest                    # newest non-rc release tag (currently v7.3.6)
+make KERNEL_REF=v7.3.6         # a specific release
+make master                    # torvalds master
+make required                  # the merge gate: newest LTS + newest release
 ```
 
 ## License

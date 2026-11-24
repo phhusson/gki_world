@@ -37,6 +37,11 @@
             "type": "string",
             "minLength": 1
           },
+          "required": {
+            "type": "boolean",
+            "default": false,
+            "description": "Every new contribution must build this target."
+          },
           "note": {
             "type": "string"
           }

@@ -43,6 +43,27 @@ update: $(KERNEL_DIR)/.git
 	$(KBUILD) olddefconfig
 	@printf 'kernel: %s\n' "$$(git -C $(KERNEL_DIR) describe --always)"
 
+# The "stable" target in targets.yaml: newest non-rc release tag. Resolved at
+# run time so no release version is hardcoded here.
+latest:
+	@ref=$$(git ls-remote --tags --refs $(KERNEL_REPO) 'v*' | \
+		awk '{print $$2}' | sed 's#^refs/tags/##' | \
+		grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$$' | sort -V | tail -1); \
+	if [ -z "$$ref" ]; then \
+		echo "latest: no release tag found in $(KERNEL_REPO)" >&2; exit 1; \
+	fi; \
+	printf 'latest release: %s\n' "$$ref"; \
+	$(MAKE) KERNEL_REF=$$ref all
+
+# The "master" target: torvalds master (the stable repo carries that branch).
+master:
+	$(MAKE) KERNEL_REF=master all
+
+# The merge gate for a contribution: newest LTS plus newest release.
+required:
+	$(MAKE) all
+	$(MAKE) latest
+
 $(KERNEL_DIR)/.config: $(KERNEL_DIR)/.git
 	$(KBUILD) defconfig
 
@@ -69,4 +90,4 @@ distclean:
 	@rm -rf $(CURDIR)/.kernel
 	@$(MAKE) --no-print-directory clean
 
-.PHONY: all update defconfig kernel modules clean distclean
+.PHONY: all update latest master required defconfig kernel modules clean distclean
