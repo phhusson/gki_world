@@ -1,0 +1,19 @@
+schema: 1
+components:
+  - name: mesa
+    role: graphics
+    apis:
+      - opengl
+      - vulkan
+    drivers:
+      - freedreno
+      - turnip
+    kernel_driver: msm
+    upstream: https://gitlab.freedesktop.org/mesa/mesa
+    upstream_ref: 6f5e2a1
+    repo: https://github.com/phhusson/mesa
+    ref: 0123456789abcdef0123456789abcdef01234567
+    patches:
+      - https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/000000
+    build: -Dgallium-drivers=freedreno -Dvulkan-drivers=freedreno
+    note: Reference maintained by the sdm845 layer maintainers.

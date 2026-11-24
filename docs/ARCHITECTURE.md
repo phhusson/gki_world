@@ -143,7 +143,9 @@ gki_world/
     qcom/layer.yaml
     mediatek/layer.yaml
   soc/
-    qcom/sdm845/layer.yaml
+    qcom/sdm845/
+      layer.yaml
+      userspace.yaml      # optional maintainer-owned userspace refs
   device/
     xiaomi/beryllium/
       layer.yaml
@@ -232,7 +234,57 @@ notes: generalized rn5t618 to also cover rc5t619
 - The linter rejects missing sources, license mismatches, blobs without hashes,
   and `derived` paths that do not exist.
 
-## 8. Device anatomy
+## 8. SoC userspace references
+
+GPU userspace (Mesa/OpenGL/Vulkan) and similar SoC-scoped userspace are
+properties of the SoC, not of a phone. gki_world does not vendor them. It
+references maintainer-owned git repositories at immutable commits, in
+`soc/<vendor>/<soc>/userspace.yaml`, validated against
+[`schemas/userspace.schema.json`](schemas/userspace.schema.json).
+
+```yaml
+schema: 1
+components:
+  - name: mesa
+    role: graphics                 # graphics | video | firmware-loader | other
+    apis: [opengl, vulkan]
+    drivers: [freedreno, turnip]
+    kernel_driver: msm             # mainline DRM driver it pairs with
+    upstream: https://gitlab.freedesktop.org/mesa/mesa
+    upstream_ref: <sha>            # must be an ancestor of ref
+    repo: https://github.com/<soc-maintainer>/mesa
+    ref: <sha>                     # immutable commit, never a branch or tag
+    patches:
+      - https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/...
+    build: -Dgallium-drivers=freedreno -Dvulkan-drivers=freedreno  # hint only
+```
+
+Rules:
+
+- `ref` MUST be a full commit sha, never a branch or tag, and the repository
+  MUST be publicly and anonymously fetchable. `upstream_ref` MUST be an ancestor
+  of `ref`, so `git log upstream_ref..ref` is the exact patch list. Published
+  refs are append-only; rebasing one is a breaking change. CI checks
+  reachability and ancestry. `upstream`/`upstream_ref` are required for
+  `role: graphics` and optional for cleanroom components.
+- The reference belongs to the SoC layer maintainers. gki_world MUST NOT mirror,
+  vendor or submodule these trees; tooling clones into a build cache.
+- Device layers MUST NOT contain `userspace.yaml` and MUST NOT fork these
+  components. A device-specific fix goes into the SoC reference. This
+  deliberately makes graphics a SoC-maintainer responsibility and prevents
+  per-phone Mesa forks.
+- `kernel_driver` names the mainline DRM driver the component pairs with. A SoC
+  whose only GPU stack is a vendor blob (kbase and friends) has no supported
+  graphics userspace; blob wrappers and HALs are out of scope.
+- GPU firmware stays fetch-only under the kernel driver's `PROVENANCE` `blobs`.
+- gki_world describes the pairing; it does not package Mesa. The Vulkan loader,
+  libdrm and distribution packaging are downstream. `build` is a hint, not a
+  recipe.
+- Keeping Mesa (MIT) as a reference also keeps the GPL-2.0-only boundary clean.
+- The same mechanism covers other SoC-scoped userspace through `role` (video
+  decoders, firmware loaders).
+
+## 9. Device anatomy
 
 ```text
 device/xiaomi/beryllium/
@@ -246,6 +298,9 @@ device/xiaomi/beryllium/
   drivers/            # forked drivers, each with PROVENANCE
   PROVENANCE          # when drivers/ exists
 ```
+
+A device MUST NOT contain `userspace.yaml` or fork SoC userspace components;
+those are referenced from the SoC layer (section 8).
 
 ### Configuration
 
@@ -267,7 +322,7 @@ page size, cmdline, compression, vendor_boot split, AVB handling, and the stock
 image used as a template. Device-specific packing scripts MUST NOT exist unless
 the format genuinely cannot be expressed as data.
 
-## 9. Harness and bringup
+## 10. Harness and bringup
 
 ### Flow
 
@@ -332,7 +387,7 @@ cannot boot every phone.
 recovery, and `g_serial` on `ttyGS0` (host sees `/dev/ttyACM0`). Network gadget
 is an optional extra when logs outgrow a tty.
 
-## 10. CI
+## 11. CI
 
 Two builds, with different jobs:
 
@@ -363,11 +418,11 @@ forked files.
 
 - `provenance`: schema validation, license compatibility, no blobs in git.
 - `evidence`: bundle format and `release` sha, for device changes.
-- `ai-review`: see section 11.
+- `ai-review`: see section 12.
 - `build-map`: maps changed paths to affected device stacks via `requires` and
   provenance, so CI does not rebuild phones that cannot be affected.
 
-## 11. Contribution and merge
+## 12. Contribution and merge
 
 ### Maintainer sets
 
@@ -394,10 +449,10 @@ The review is part of the gate, so it must be reproducible: pinned model,
 versioned prompt, transcript attached to the PR, re-runnable on demand. It blocks
 on layering violations, missing or wrong provenance, non-mainline APIs without a
 global definition, vendor uapi, blobs in git, `=y` drivers, and the footguns in
-section 13. It is advisory on style and consolidation. A human maintainer MAY
+section 15. It is advisory on style and consolidation. A human maintainer MAY
 override a false negative with a note.
 
-## 12. Consolidation
+## 13. Consolidation
 
 - Direction is up only: device → SoC → vendor → global. Never down.
 - Trigger: two or more users of equivalent code, detected from the provenance
@@ -410,7 +465,7 @@ override a false negative with a note.
 - Consolidation PRs are batched and low priority. They never block a feature
   PR, and a device maintainer may keep a fork indefinitely.
 
-## 13. API policy
+## 14. API policy
 
 - If mainline has an API, use it. No vendor-private interfaces.
 - If mainline lacks an API, define it once globally:
@@ -422,7 +477,7 @@ override a false negative with a note.
 - When upstream grows an equivalent API, the global one is deprecated with a
   migration note and removed once users have moved.
 
-## 14. Known footguns
+## 15. Known footguns
 
 To expand into `docs/bringup.md`:
 
@@ -444,7 +499,7 @@ To expand into `docs/bringup.md`:
 - Suspend/resume and runtime PM: the most common post-boot regression.
 - DT: a modified SoC dtsi must be forked locally, not patched in place.
 
-## 15. Open items
+## 16. Open items
 
 - Repository license (code GPL-2.0-only; docs license to choose).
 - `targets.yaml` format and the exact target identifiers.
@@ -452,3 +507,5 @@ To expand into `docs/bringup.md`:
 - Evidence trust model: signing or CI attestation beyond the release sha.
 - Whether full `.config` snapshots belong in git.
 - CI provider and where the nightly symbol index is stored.
+- Fetch tooling for SoC userspace references, and whether the harness gets a
+  graphics smoke test.

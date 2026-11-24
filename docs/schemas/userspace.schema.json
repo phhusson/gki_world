@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/phhusson/gki_world/docs/schemas/userspace.schema.json",
+  "title": "gki_world SoC userspace references",
+  "description": "Maintainer-owned git references for SoC-scoped userspace (Mesa, video decoders, firmware loaders). Only valid at soc/<vendor>/<soc>/userspace.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "components"],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/component"
+      }
+    }
+  },
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$"
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "role", "kernel_driver", "repo", "ref"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "role": {
+          "enum": ["graphics", "video", "firmware-loader", "other"]
+        },
+        "apis": {
+          "type": "array",
+          "items": {
+            "enum": ["opengl", "vulkan"]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "drivers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "kernel_driver": {
+          "type": "string",
+          "minLength": 1
+        },
+        "upstream": {
+          "type": "string",
+          "format": "uri"
+        },
+        "upstream_ref": {
+          "$ref": "#/$defs/sha"
+        },
+        "repo": {
+          "type": "string",
+          "format": "uri"
+        },
+        "ref": {
+          "$ref": "#/$defs/sha"
+        },
+        "patches": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "uniqueItems": true
+        },
+        "build": {
+          "type": "string",
+          "minLength": 1
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "role": { "const": "graphics" } },
+            "required": ["role"]
+          },
+          "then": {
+            "required": ["apis", "upstream", "upstream_ref"]
+          },
+          "else": {
+            "not": { "required": ["apis"] }
+          }
+        },
+        {
+          "if": {
+            "required": ["upstream"]
+          },
+          "then": {
+            "required": ["upstream_ref"]
+          },
+          "else": {
+            "not": { "required": ["upstream_ref"] }
+          }
+        }
+      ]
+    }
+  }
+}
