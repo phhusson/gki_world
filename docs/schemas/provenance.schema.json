@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/phhusson/gki_world/docs/schemas/provenance.schema.json",
+  "title": "gki_world PROVENANCE",
+  "description": "Where a driver directory's code and blobs came from. One file per driver directory.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "license", "sources"],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "license": {
+      "$ref": "#/$defs/spdx"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "blobs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/blob"
+      }
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "spdx": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9.+-]+( (?:AND|OR) [A-Za-z0-9.+-]+)*$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "derived"],
+      "properties": {
+        "kind": {
+          "enum": ["mainline", "gkiw", "vendor", "other"]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "license": {
+          "$ref": "#/$defs/spdx"
+        },
+        "derived": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "mainline" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["path", "commit"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "gkiw" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["path", "commit"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "vendor" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["url", "commit"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "other" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "anyOf": [
+              { "required": ["url"] },
+              { "required": ["path"] }
+            ]
+          }
+        }
+      ]
+    },
+    "blob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "device_path", "sha256"],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "device_path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "dump": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "redistributable": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "anyOf": [
+        { "required": ["dump"] },
+        { "required": ["url"] }
+      ]
+    }
+  }
+}

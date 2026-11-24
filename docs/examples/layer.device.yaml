@@ -1,0 +1,10 @@
+schema: 1
+kind: device
+id: device/xiaomi/beryllium
+description: Xiaomi Pocophone F1 (sdm845)
+requires:
+  - soc/qcom/sdm845
+maintainers:
+  - "@phhusson"
+status: boots
+boots_sha: 0123456789abcdef0123456789abcdef01234567

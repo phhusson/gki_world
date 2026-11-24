@@ -1,0 +1,28 @@
+schema: 1
+license: GPL-2.0-only
+sources:
+  - kind: mainline
+    path: drivers/mfd/rn5t618.c
+    commit: 6f5e2a1
+    license: GPL-2.0-only
+    derived:
+      - rn5t618-core.c
+      - rn5t618-regmap.c
+  - kind: gkiw
+    path: soc/qcom/rn5t619
+    commit: 0123456789abcdef0123456789abcdef01234567
+    derived:
+      - rn5t619-regulator.c
+  - kind: vendor
+    url: https://github.com/xiaomi-sm8250/kernel
+    commit: 89abcdef0123456789abcdef0123456789abcdef
+    path: drivers/mfd/rc5t619.c
+    license: GPL-2.0-only
+    derived:
+      - rc5t619-regulator.c
+blobs:
+  - purpose: touch controller firmware
+    device_path: /vendor/firmware/touch.bin
+    dump: dumps.tadiphone.dev/beryllium/vendor.img
+    sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+notes: Generalized rn5t618 to also cover rc5t619.

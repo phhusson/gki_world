@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/phhusson/gki_world/docs/schemas/layer.schema.json",
+  "title": "gki_world layer.yaml",
+  "description": "Metadata for a layer root (global, SoC vendor, SoC, or device).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "kind", "id", "maintainers"],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "kind": {
+      "enum": ["global", "soc-vendor", "soc", "device"]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^(global|vendor/[a-z0-9][a-z0-9._-]*|soc/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*|device/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*)$"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(vendor|soc)/[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)?$"
+      },
+      "uniqueItems": true
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^([0-9]+\\.[0-9]+|stable|master)$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "maintainers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^@?[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "status": {
+      "enum": ["boots", "builds", "wip"]
+    },
+    "boots_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "kind": { "const": "device" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "required": ["status"]
+      },
+      "else": {
+        "not": { "required": ["status"] }
+      }
+    },
+    {
+      "if": {
+        "properties": { "kind": { "const": "global" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "not": { "required": ["requires"] }
+      },
+      "else": {
+        "required": ["requires"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "status": { "const": "boots" } },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["boots_sha"]
+      },
+      "else": {
+        "not": { "required": ["boots_sha"] }
+      }
+    }
+  ]
+}
