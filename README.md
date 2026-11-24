@@ -61,6 +61,15 @@ defaults to `aarch64-linux-gnu-`; override `CROSS_COMPILE`, `ARCH`,
 `KERNEL_REF` or `KERNEL_DIR` as needed. `global/test_module/` is a build smoke
 test, not a driver.
 
+The default ref is the newest LTS (`linux-6.18.y`). When a new LTS lands, bump
+`KERNEL_REF` here and the LTS entry in `targets.yaml`, then fix the build behind
+version guards. The checkout directory follows the ref, so the old tree stays
+usable while the new one is brought up:
+
+```sh
+make KERNEL_REF=linux-6.20.y
+```
+
 ## License
 
 Not decided yet; see the open items in the architecture document. Code is

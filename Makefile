@@ -15,8 +15,11 @@
 # full kernel build; later iterations use `make modules`.
 
 KERNEL_REPO ?= https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+# Keep in sync with the newest LTS in targets.yaml. The checkout directory
+# follows the ref, so `make KERNEL_REF=linux-6.20.y` builds a new tree next to
+# the old one instead of reusing it.
 KERNEL_REF  ?= linux-6.18.y
-KERNEL_DIR  ?= $(CURDIR)/.kernel/linux-6.18.y
+KERNEL_DIR  ?= $(CURDIR)/.kernel/$(KERNEL_REF)
 
 ARCH          ?= arm64
 CROSS_COMPILE ?= aarch64-linux-gnu-
