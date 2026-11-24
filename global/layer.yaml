@@ -1,0 +1,11 @@
+schema: 1
+kind: global
+id: global
+description: Shared helpers, global APIs and device-independent tooling
+targets:
+  - "6.12"
+  - "6.18"
+  - stable
+  - master
+maintainers:
+  - "@phhusson"

@@ -1,0 +1,8 @@
+schema: 1
+license: GPL-2.0-only
+sources:
+  - kind: other
+    path: global/test_module
+    derived:
+      - main.c
+    note: Written for gki_world as a build smoke test.

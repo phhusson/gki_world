@@ -48,6 +48,19 @@ are handled with `#if LINUX_VERSION_CODE` in the driver, not with a shim layer.
 
 Examples live in [`docs/examples/`](docs/examples/).
 
+## Building
+
+```sh
+make            # latest linux-6.18.y, arm64 defconfig, kernel + all modules
+make modules    # rebuild gki_world modules only
+make update     # move to the current 6.18.y tip and rebuild
+```
+
+The kernel checkout lives in `.kernel/` and is ignored. The cross compiler
+defaults to `aarch64-linux-gnu-`; override `CROSS_COMPILE`, `ARCH`,
+`KERNEL_REF` or `KERNEL_DIR` as needed. `global/test_module/` is a build smoke
+test, not a driver.
+
 ## License
 
 Not decided yet; see the open items in the architecture document. Code is
