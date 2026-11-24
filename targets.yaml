@@ -1,0 +1,26 @@
+schema: 1
+# Kernel floor: the N-1 LTS. Targets are addressed by these ids in layer.yaml.
+floor: "6.12"
+
+targets:
+  - id: "6.12"
+    kind: lts
+    repo: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+    ref: linux-6.12.y
+
+  - id: "6.18"
+    kind: lts
+    repo: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+    ref: linux-6.18.y
+
+  # Newest mainline release, non-rc. Tooling resolves "latest-tag" to the
+  # newest vX.Y tag at build time; this file is updated when the window moves.
+  - id: stable
+    kind: release
+    repo: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+    ref: latest-tag
+
+  - id: master
+    kind: master
+    repo: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+    ref: master

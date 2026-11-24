@@ -86,7 +86,8 @@ global module. Duplicate module names are a hard load failure on device.
 - Floor: the N-1 LTS, currently 6.12. The floor moves when an LTS reaches EOL;
   it is not extended backwards.
 - Matrix: the two current LTS releases (6.12 and its successor), current stable,
-  and torvalds master. The concrete list lives in `targets.yaml` *(planned)*.
+  and torvalds master. The concrete list lives in
+  [`targets.yaml`](../targets.yaml).
 - A layer MAY narrow `targets:` in its `layer.yaml` (for example a driver only
   needed on 6.18+). It MUST NOT widen beyond the global set.
 - No compatibility shims. Version differences are handled with
@@ -324,6 +325,9 @@ the format genuinely cannot be expressed as data.
 
 ## 10. Harness and bringup
 
+The practical guide is [bringup.md](bringup.md). This section is the shape of the
+harness; that document is the workflow and the footguns.
+
 ### Flow
 
 1. Fetch the stock boot image from `dumps.tadiphone.dev` (cached by hash) or use
@@ -502,7 +506,8 @@ To expand into `docs/bringup.md`:
 ## 16. Open items
 
 - Repository license (code GPL-2.0-only; docs license to choose).
-- `targets.yaml` format and the exact target identifiers.
+- Rotation policy when a new LTS lands: bump `targets.yaml`, drop the old
+  target's guards, update the floor.
 - Boot image tool scope: which formats and AVB cases are data vs. code.
 - Evidence trust model: signing or CI attestation beyond the release sha.
 - Whether full `.config` snapshots belong in git.

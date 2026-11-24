@@ -8,7 +8,8 @@ out-of-tree drivers. gki_world is the version where the out-of-tree drivers are
 the ones you would actually send upstream.
 
 **Status: design phase.** Nothing builds yet. The normative design is
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the hands-on workflow is
+[docs/bringup.md](docs/bringup.md).
 
 ## Layers
 
