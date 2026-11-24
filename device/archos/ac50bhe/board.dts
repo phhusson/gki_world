@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Archos 50b Helium 4G (AC50BHE)
+ *
+ * Minimal bringup tree. Everything below is deliberately limited to what is
+ * needed for a console and the harness; the vendor DTB still needs to be
+ * recovered and the missing nodes added:
+ *
+ *   - panel and backlight
+ *   - touchscreen
+ *   - accelerometer and other sensors
+ *   - SD card regulator and card-detect
+ *   - keys, LEDs, vibrator
+ *   - camera, sound, modem/remoteproc
+ *
+ * The memory node is filled in by lk2nd, which the stock MSM8916 bootloader
+ * needs as a first stage.
+ */
+
+/dts-v1/;
+
+#include "msm8916-pm8916.dtsi"
+
+/ {
+	model = "Archos 50b Helium 4G";
+	compatible = "archos,ac50bhe", "qcom,msm8916";
+	chassis-type = "handset";
+
+	aliases {
+		mmc0 = &sdhc_1; /* eMMC */
+		serial0 = &blsp_uart2;
+	};
+
+	chosen {
+		stdout-path = "serial0";
+	};
+};
+
+&blsp_uart2 {
+	pinctrl-0 = <&blsp_uart2_console_default>;
+	pinctrl-1 = <&blsp_uart2_console_sleep>;
+	pinctrl-names = "default", "sleep";
+	status = "okay";
+};
+
+&pm8916_usbin {
+	status = "okay";
+};
+
+&sdhc_1 {
+	status = "okay";
+};

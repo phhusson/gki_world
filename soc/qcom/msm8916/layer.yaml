@@ -1,0 +1,8 @@
+schema: 1
+kind: soc
+id: soc/qcom/msm8916
+description: Qualcomm Snapdragon 410 (MSM8916)
+requires:
+  - vendor/qcom
+maintainers:
+  - "@phhusson"

@@ -7,7 +7,9 @@ The name is a joke at GKI's expense: GKI wanted a stable kernel with
 out-of-tree drivers. gki_world is the version where the out-of-tree drivers are
 the ones you would actually send upstream.
 
-**Status: design phase.** Nothing builds yet. The normative design is
+**Status: early scaffold.** The LTS and latest-release builds and the test
+module work. The first device (Archos 50b Helium, MSM8916) is scaffolded but
+does not boot yet. The normative design is
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the hands-on workflow is
 [docs/bringup.md](docs/bringup.md).
 

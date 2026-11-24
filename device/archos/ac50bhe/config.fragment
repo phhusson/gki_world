@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Core kernel options for the harness. In-tree only, so =y is correct.
+# gki_world drivers stay modules and are not selected here.
+
+CONFIG_PSTORE=y
+CONFIG_PSTORE_RAM=y
+CONFIG_PSTORE_CONSOLE=y
+CONFIG_PSTORE_PMSG=y
+CONFIG_PSTORE_FTRACE=y
+
+CONFIG_MAGIC_SYSRQ=y
+CONFIG_DEBUG_FS=y
+
+CONFIG_SERIAL_MSM=y
+CONFIG_MMC_SDHCI_MSM=y
+
+CONFIG_USB_GADGET=y
+CONFIG_USB_CONFIGFS=y
+CONFIG_USB_CONFIGFS_ACM=y
+CONFIG_USB_CHIPIDEA=y
+CONFIG_USB_CHIPIDEA_UDC=y
+CONFIG_USB_CHIPIDEA_MSM=y
+CONFIG_PHY_QCOM_USB_HS=y
+
+# Keep a wedged boot from hanging the harness.
+CONFIG_PANIC_ON_OOPS=y
+CONFIG_PANIC_TIMEOUT=10

@@ -1,0 +1,20 @@
+# Data for the shared boot image tool (global/tools, planned).
+# Every value is a TODO until it has been checked against a stock image.
+
+format: android-boot-v0        # TODO: verify the header version
+pagesize: 2048                 # TODO: verify from the stock image
+cmdline: >-
+  console=ttyMSM0,115200n8 earlycon keep_bootcon ignore_loglevel
+compression: gzip
+avb: unknown                   # TODO: check whether vbmeta flags are needed
+
+template:
+  dump: null                   # ac50bhe is not on dumps.tadiphone.dev
+  sha256: null
+
+lk2nd:
+  required: true
+  note: >-
+    The stock MSM8916 bootloader does not pass a mainline device tree. lk2nd
+    is flashed as the first stage and boots the gki_world image through its
+    fastboot interface.

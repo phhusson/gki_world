@@ -1,0 +1,9 @@
+schema: 1
+kind: device
+id: device/archos/ac50bhe
+description: Archos 50b Helium 4G (AC50BHE, MSM8916)
+requires:
+  - soc/qcom/msm8916
+maintainers:
+  - "@phhusson"
+status: wip
