@@ -90,8 +90,9 @@ The region must survive the first-stage bootloader. On G12A the vendor first
 stage initializes DDR and does not scrub RAM, so the data survives a reset.
 
 The G12A dev DT also reserves `0x1c100000..0x1c300000` for the 2ndstage log,
-so a Linux boot cannot overwrite it. `soc/amlogic/g12a/config.fragment` turns on
-pstore/ramoops and keeps the Meson watchdog off until ssh works.
+so a Linux boot cannot overwrite it, and constrains `linux,cma` to 128–384 MiB
+so the CMA pool cannot overlap either region. `soc/amlogic/g12a/config.fragment`
+turns on pstore/ramoops and keeps the Meson watchdog off until ssh works.
 
 The prototype memory map is part of the contract:
 

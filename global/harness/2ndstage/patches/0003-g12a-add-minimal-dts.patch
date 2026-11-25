@@ -1,9 +1,9 @@
 diff --git a/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts b/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts
 new file mode 100644
-index 00000000..c22c1f75
+index 00000000..96070e32
 --- /dev/null
 +++ b/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,71 @@
 +// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 +/*
 + * gki_world development bootloader device tree for Amlogic G12A.
@@ -36,6 +36,16 @@ index 00000000..c22c1f75
 +	};
 +
 +	reserved-memory {
++		/*
++		 * Keep CMA away from the pstore and 2ndstage log at 0x1c000000+.
++		 * The SoC dtsi leaves CMA unplaced and the kernel put it at
++		 * 0x0cc00000..0x1cbfffff, over both regions.
++		 */
++		linux,cma {
++			size = <0x0 0x08000000>; /* 128 MiB */
++			alloc-ranges = <0x0 0x08000000 0x0 0x10000000>;
++		};
++
 +		ramoops@1c000000 {
 +			compatible = "ramoops";
 +			reg = <0x0 0x1c000000 0x0 0x00100000>;
