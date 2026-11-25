@@ -24,12 +24,12 @@ The fork is deliberately thin:
 
 ```text
 pinned U-Boot commit + small patches
-  - gkiw command: pstore hex dump, watchdog control, crash log
+  - gkiw command: pstore hex dump, watchdog control, console log
   - fastboot oem pstore: multiresponse chunked RAM read
   - fastboot preboot hook: arm the watchdog before bootm
   - minimal G12A devicetree: UART, DWC2 gadget, watchdog only
   - 512 MiB floor, no relocation, Amlogic chip serial as fastboot serialno
-  - ARM64 exception hook writing the persistent 2ndstage crash log
+  - continuous persistent console log, A/B slots, exception register dump
 ```
 
 Nothing else is forked. Rebase by bumping `uboot.conf` and refreshing the
@@ -54,7 +54,7 @@ boards the bootloader and Linux trees must not add a UART pinctrl node.
 |------|-----------|
 | boot a kernel | `fastboot boot boot.img` |
 | read pstore | `fastboot oem pstore:<addr>:<size>` |
-| read 2ndstage crash log | `gkiw log` or `oem pstore:0x1c100000:0x10000` |
+| read 2ndstage console log | `gkiw log` or host `gkiw-fastboot log` |
 | reset on hang | watchdog armed in `fastboot_preboot()` |
 | manual watchdog | `gkiw watchdog [ms\|off]` on the UART |
 
@@ -89,6 +89,10 @@ reserved-memory {
 The region must survive the first-stage bootloader. On G12A the vendor first
 stage initializes DDR and does not scrub RAM, so the data survives a reset.
 
+The G12A dev DT also reserves `0x1c100000..0x1c300000` for the 2ndstage log,
+so a Linux boot cannot overwrite it. `soc/amlogic/g12a/config.fragment` turns on
+pstore/ramoops and keeps the Meson watchdog off until ssh works.
+
 The prototype memory map is part of the contract:
 
 | Region | Address | Notes |
@@ -96,7 +100,7 @@ The prototype memory map is part of the contract:
 | secure world / first stage | `0x00000000..0x08000000` | first 128 MiB, never used for data |
 | fastboot buffer | `0x10000000..0x18000000` | 128 MiB |
 | Linux pstore | `0x1c000000..0x1c100000` | 1 MiB |
-| 2ndstage crash log | `0x1c100000..0x1c200000` | 64 KiB |
+| 2ndstage console log | `0x1c100000..0x1c300000` | 128 KiB, two slots |
 | initial stack | `0x20000000` | top of the 512 MiB assumption |
 
 The bootloader assumes **at least 512 MiB of RAM** and does not parse the real
@@ -140,33 +144,52 @@ fastboot indefinitely, a kernel that panics or wedges comes back on its own, and
 a boot that must not be interrupted can use `gkiw watchdog off` from the UART
 before booting.
 
-## Second-stage crash log
+### Do not take over the watchdog yet
 
-Before resetting on an ARM64 exception, U-Boot writes a text register dump to a
-persistent region outside its BSS/stack/heap and the Linux pstore:
+Until **ssh into Linux works**, the Linux kernel MUST NOT enable or pet the
+watchdog. The 60 s reset is the only way out of a hung kernel; if Linux takes
+over the timer, a wedged boot stops coming back and the loop needs a physical
+power cycle. Keep `CONFIG_MESON_WATCHDOG` off (and do not load it from the
+initramfs) until a remote shell is reliable. Then enable it deliberately, either
+in-kernel or with a userspace watchdog.
+
+## Second-stage console log
+
+Every console character is written to a persistent 128 KiB region outside
+U-Boot's BSS/stack/heap and the Linux pstore:
 
 ```text
-0x1c100000..0x1c200000   64 KiB, CONFIG_GKIW_LOG_ADDR/SIZE
+0x1c100000..0x1c200000   slot 0: previous boot
+0x1c200000..0x1c300000   slot 1: current boot
 ```
 
-The header is `GKLG`, a sequence number and the text length, followed by the
-exception reason, `esr`, `elr`, `spsr` and `x0..x30`. It is separate from
-ramoops, so a 2ndstage crash does not overwrite a Linux pstore record.
+`CONFIG_GKIW_LOG_ADDR` / `CONFIG_GKIW_LOG_SIZE` select the region. On the first
+console character of a boot, slot 1 (the last boot's log) is copied to slot 0
+and a fresh ring starts in slot 1. A normal watchdog reset therefore preserves
+the previous console; an ARM64 exception also appends `esr`, `elr`, `spsr` and
+`x0..x30` to the current slot. Panic messages are in the console text; the
+register dump is exception-only.
+
+The header is `GLK2` with a ring head/used/size and a sequence number. It is
+separate from ramoops, so the 2ndstage log never overwrites a Linux pstore.
 
 On the next boot:
 
 ```sh
-# over UART
+# over UART: previous slot by default
 gkiw log
+gkiw log current
 gkiw log clear
 
-# or from the host, using the same chunked transport
+# or from the host, parsing the two slots
+global/harness/2ndstage/host/gkiw-fastboot log
+# raw region if you want to inspect it yourself
 global/harness/2ndstage/host/gkiw-fastboot pstore \
-    --addr 0x1c100000 --size 0x10000 -o 2ndstage-crash.bin
+    --addr 0x1c100000 --size 0x20000 -o 2ndstage-log.bin
 ```
 
-The exception hook runs from `show_regs()`, so it captures synchronous aborts,
-SErrors and bad-mode exceptions. A plain `panic()` path is not captured yet.
+The host `log` command reads the previous slot by default; `--current` reads
+the running boot.
 
 ## Build
 

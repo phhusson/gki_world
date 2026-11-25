@@ -1,0 +1,15 @@
+# Linux development config for the G12A dev loop.
+#
+# Apply on top of arm64 defconfig with scripts/kconfig/merge_config.sh.
+#
+# The watchdog stays OFF on purpose: until ssh into Linux works, the 60 s
+# hardware watchdog armed by the 2ndstage is the only way out of a hung
+# kernel. Do not enable CONFIG_MESON_WATCHDOG (or load it from the initramfs)
+# before that. Enable it deliberately once a remote shell is reliable.
+
+CONFIG_PSTORE=y
+CONFIG_PSTORE_RAM=y
+CONFIG_PSTORE_CONSOLE=y
+CONFIG_PSTORE_PMSG=y
+
+# CONFIG_MESON_WATCHDOG is not set

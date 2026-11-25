@@ -1,0 +1,358 @@
+diff --git a/cmd/Kconfig b/cmd/Kconfig
+index a11e302a..45f5046c 100644
+--- a/cmd/Kconfig
++++ b/cmd/Kconfig
+@@ -1235,8 +1235,8 @@ config GKIW_LOG_ADDR
+ 	  stack/heap.
+ 
+ config GKIW_LOG_SIZE
+-	hex "gkiw 2ndstage crash log size"
+-	default 0x10000
++	hex "gkiw 2ndstage console log size (two slots)"
++	default 0x20000
+ 	depends on CMD_GKIW
+ 
+ config CMD_FASTBOOT_ABORT_KEYED
+diff --git a/cmd/gkiw.c b/cmd/gkiw.c
+index 0b5ab61a..7f8ea8b7 100644
+--- a/cmd/gkiw.c
++++ b/cmd/gkiw.c
+@@ -2,8 +2,8 @@
+ /*
+  * gki_world second-stage helpers.
+  *
+- * Deliberately small: read a RAM region (pstore/ramoops) and arm the hardware
+- * watchdog before handing control to Linux.
++ * Deliberately small: persistent console/crash log, RAM region dump and
++ * hardware watchdog control.
+  */
+ 
+ #include <command.h>
+@@ -13,6 +13,7 @@
+ #include <gkiw.h>
+ #include <linux/string.h>
+ #include <linux/types.h>
++#include <stdio.h>
+ #include <vsprintf.h>
+ #include <wdt.h>
+ #include <asm/ptrace.h>
+@@ -20,78 +21,115 @@
+ #define GKIW_WDT_DEFAULT_MS	60000
+ #define GKIW_PSTORE_LINE	16
+ 
+-#define GKIW_LOG_MAGIC		0x474c4b47 /* "GKLG" */
++#define GKIW_LOG_MAGIC		0x474c4b32 /* "GLK2" */
++#define GKIW_LOG_SLOT_SIZE	(CONFIG_GKIW_LOG_SIZE / 2)
++#define GKIW_LOG_CAPACITY	(GKIW_LOG_SLOT_SIZE - sizeof(struct gkiw_log_hdr))
+ 
+ struct gkiw_log_hdr {
+ 	u32 magic;
+-	u32 len;
++	u32 head;
++	u32 used;
++	u32 size;
+ 	u32 seq;
+ 	u32 reserved;
+ };
+ 
+-static struct gkiw_log_hdr *gkiw_log_header(void)
++static bool gkiw_log_ready;
++static bool gkiw_log_suspend;
++
++static struct gkiw_log_hdr *gkiw_log_slot(int slot)
+ {
+-	return (struct gkiw_log_hdr *)(unsigned long)CONFIG_GKIW_LOG_ADDR;
++	return (struct gkiw_log_hdr *)((unsigned long)CONFIG_GKIW_LOG_ADDR +
++				       slot * GKIW_LOG_SLOT_SIZE);
+ }
+ 
+-static char *gkiw_log_data(void)
++static char *gkiw_log_text(struct gkiw_log_hdr *hdr)
+ {
+-	return (char *)gkiw_log_header() + sizeof(struct gkiw_log_hdr);
++	return (char *)(hdr + 1);
+ }
+ 
+-static u32 gkiw_log_capacity(void)
++static void gkiw_log_sync(struct gkiw_log_hdr *hdr)
+ {
+-	return CONFIG_GKIW_LOG_SIZE - sizeof(struct gkiw_log_hdr);
++	ulong start = (ulong)hdr;
++
++	flush_dcache_range(start, start + GKIW_LOG_SLOT_SIZE);
+ }
+ 
+-static void gkiw_log_sync(void)
++/*
++ * Slot 1 is the current boot. On the first console character, copy the
++ * previous boot's slot over slot 0, then start a fresh ring in slot 1.
++ */
++static void gkiw_log_init(void)
+ {
+-	flush_dcache_range(CONFIG_GKIW_LOG_ADDR,
+-			   CONFIG_GKIW_LOG_ADDR + CONFIG_GKIW_LOG_SIZE);
++	struct gkiw_log_hdr *prev = gkiw_log_slot(0);
++	struct gkiw_log_hdr *cur = gkiw_log_slot(1);
++	u32 seq = 0;
++
++	if (cur->magic == GKIW_LOG_MAGIC) {
++		memcpy(prev, cur, GKIW_LOG_SLOT_SIZE);
++		gkiw_log_sync(prev);
++		seq = cur->seq;
++	}
++
++	cur->magic = GKIW_LOG_MAGIC;
++	cur->head = 0;
++	cur->used = 0;
++	cur->size = GKIW_LOG_CAPACITY;
++	cur->seq = seq + 1;
++	cur->reserved = 0;
++	gkiw_log_ready = true;
++	gkiw_log_sync(cur);
++}
++
++void gkiw_log_console_char(char c)
++{
++	struct gkiw_log_hdr *hdr;
++	char *data;
++
++	if (gkiw_log_suspend)
++		return;
++	if (!gkiw_log_ready)
++		gkiw_log_init();
++
++	hdr = gkiw_log_slot(1);
++	data = gkiw_log_text(hdr);
++	data[hdr->head] = c;
++	hdr->head++;
++	if (hdr->head >= hdr->size)
++		hdr->head = 0;
++	if (hdr->used < hdr->size)
++		hdr->used++;
++	if (c == '\n')
++		gkiw_log_sync(hdr);
++}
++
++void gkiw_log_console(const char *s)
++{
++	while (*s)
++		gkiw_log_console_char(*s++);
+ }
+ 
+ /*
+  * Called from the ARM64 exception path before the register dump is printed.
+- * The region is plain RAM outside U-Boot's BSS/stack/heap and survives reset.
++ * The console is already in the ring; append the reason and registers.
+  */
+ void gkiw_log_crash(struct pt_regs *regs)
+ {
+-	struct gkiw_log_hdr *hdr = gkiw_log_header();
+-	char *data = gkiw_log_data();
+-	u32 cap = gkiw_log_capacity();
+-	u32 used = 0;
+ 	static char buf[1024];
+-	u32 seq = 0;
++	struct gkiw_log_hdr *hdr;
+ 	int len = 0;
+ 	int ret;
+ 	int i;
+ 
+ 	if (!regs)
+ 		return;
+-
+-	if (hdr->magic == GKIW_LOG_MAGIC)
+-		seq = hdr->seq;
+-	seq++;
+-
+-#if CONFIG_IS_ENABLED(CONSOLE_RECORD)
+-	{
+-		u32 console_cap = cap > sizeof(buf) ? cap - sizeof(buf) : 0;
+-
+-		while (used + 1 < console_cap && !console_record_isempty()) {
+-			ret = console_record_readline(data + used,
+-						      console_cap - used);
+-			if (ret <= 0)
+-				break;
+-			used += ret;
+-		}
+-		if (used > 0 && data[used - 1] != '\n' && used < console_cap)
+-			data[used++] = '\n';
+-	}
+-#endif
++	if (!gkiw_log_ready)
++		gkiw_log_init();
++	hdr = gkiw_log_slot(1);
+ 
+ 	ret = snprintf(buf + len, sizeof(buf) - len,
+ 		       "gkiw 2ndstage crash #%u\nesr=0x%016lx elr=0x%016lx spsr=0x%016lx\n",
+-		       seq, regs->esr, regs->elr, regs->spsr);
++		       hdr->seq, regs->esr, regs->elr, regs->spsr);
+ 	if (ret > 0)
+ 		len += ret;
+ 	if (len >= (int)sizeof(buf))
+@@ -107,44 +145,68 @@ void gkiw_log_crash(struct pt_regs *regs)
+ 	if (len >= (int)sizeof(buf))
+ 		len = sizeof(buf);
+ 
+-	if (used + len > cap)
+-		len = cap - used;
+-	memcpy(data + used, buf, len);
+-	used += len;
++	gkiw_log_console(buf);
++	gkiw_log_sync(hdr);
++}
+ 
+-	hdr->len = used;
+-	hdr->seq = seq;
+-	hdr->magic = GKIW_LOG_MAGIC;
+-	gkiw_log_sync();
++static bool gkiw_log_valid(struct gkiw_log_hdr *hdr)
++{
++	return hdr->magic == GKIW_LOG_MAGIC && hdr->size &&
++	       hdr->size <= GKIW_LOG_CAPACITY && hdr->used <= hdr->size;
++}
++
++static void gkiw_log_print(int slot, const char *label)
++{
++	struct gkiw_log_hdr *hdr = gkiw_log_slot(slot);
++	char *data = gkiw_log_text(hdr);
++	u32 start, i;
++
++	if (!gkiw_log_valid(hdr))
++		return;
++
++	gkiw_log_suspend = true;
++	printf("--- %s 2ndstage log (seq %u) ---\n", label, hdr->seq);
++	start = (hdr->used == hdr->size) ? hdr->head : 0;
++	for (i = 0; i < hdr->used; i++)
++		putc(data[(start + i) % hdr->size]);
++	if (hdr->used && data[(start + hdr->used - 1) % hdr->size] != '\n')
++		putc('\n');
++	gkiw_log_suspend = false;
+ }
+ 
+ static int gkiw_do_log(int argc, char *const argv[])
+ {
+-	struct gkiw_log_hdr *hdr = gkiw_log_header();
++	struct gkiw_log_hdr *prev = gkiw_log_slot(0);
+ 
+ 	if (argc == 2 && !strcmp(argv[1], "clear")) {
+-		hdr->magic = 0;
+-		gkiw_log_sync();
+-		printf("gkiw: 2ndstage crash log cleared\n");
++		gkiw_log_suspend = true;
++		gkiw_log_slot(0)->magic = 0;
++		gkiw_log_slot(1)->magic = 0;
++		gkiw_log_sync(gkiw_log_slot(0));
++		gkiw_log_sync(gkiw_log_slot(1));
++		gkiw_log_ready = false;
++		gkiw_log_suspend = false;
++		printf("gkiw: 2ndstage logs cleared\n");
+ 		return 0;
+ 	}
+-	if (argc != 1)
++	if (argc > 2)
+ 		return CMD_RET_USAGE;
+ 
+ 	invalidate_dcache_range(CONFIG_GKIW_LOG_ADDR,
+ 				CONFIG_GKIW_LOG_ADDR + CONFIG_GKIW_LOG_SIZE);
+-	if (hdr->magic != GKIW_LOG_MAGIC) {
+-		printf("gkiw: no 2ndstage crash log\n");
+-		return 0;
+-	}
+-	if (hdr->len > gkiw_log_capacity()) {
+-		printf("gkiw: corrupt 2ndstage crash log (len=%u)\n", hdr->len);
+-		return CMD_RET_FAILURE;
+-	}
+ 
+-	printf("%s", gkiw_log_data());
+-	if (!hdr->len || gkiw_log_data()[hdr->len - 1] != '\n')
+-		printf("\n");
++	if (argc == 2 && !strcmp(argv[1], "current")) {
++		gkiw_log_print(1, "current");
++	} else if (argc == 2 && !strcmp(argv[1], "previous")) {
++		gkiw_log_print(0, "previous");
++	} else if (argc == 1) {
++		if (gkiw_log_valid(prev))
++			gkiw_log_print(0, "previous");
++		else
++			gkiw_log_print(1, "current");
++	} else {
++		return CMD_RET_USAGE;
++	}
+ 
+ 	return 0;
+ }
+@@ -267,4 +329,4 @@ U_BOOT_CMD(gkiw, 6, 1, do_gkiw,
+ 	   "gki_world second-stage helpers",
+ 	   "pstore <addr> <size> [offset] [len] - hex dump a RAM/pstore region\n"
+ 	   "gkiw watchdog [ms|off] - arm (default 60000 ms) or stop the watchdog\n"
+-	   "gkiw log [clear] - show or clear the previous 2ndstage crash log");
++	   "gkiw log [previous|current|clear] - show or clear the 2ndstage console log");
+diff --git a/common/console.c b/common/console.c
+index 54d12494..e88327af 100644
+--- a/common/console.c
++++ b/common/console.c
+@@ -11,6 +11,7 @@
+ #include <display_options.h>
+ #include <dm.h>
+ #include <env.h>
++#include <gkiw.h>
+ #include <stdarg.h>
+ #include <iomux.h>
+ #include <malloc.h>
+@@ -29,6 +30,14 @@ DECLARE_GLOBAL_DATA_PTR;
+ 
+ #define CSI "\x1b["
+ 
++void __weak gkiw_log_console(const char *s)
++{
++}
++
++void __weak gkiw_log_console_char(char c)
++{
++}
++
+ static int on_console(const char *name, const char *value, enum env_op op,
+ 	int flags)
+ {
+@@ -326,6 +335,8 @@ static void console_putc(int file, const char c)
+ 	int i;
+ 	struct stdio_dev *dev;
+ 
++	gkiw_log_console_char(c);
++
+ 	for_each_console_dev(i, file, dev) {
+ 		if (dev->putc != NULL)
+ 			dev->putc(dev, c);
+@@ -355,6 +366,8 @@ static void console_puts_select(int file, bool serial_only, const char *s)
+ 
+ void console_puts_select_stderr(bool serial_only, const char *s)
+ {
++	gkiw_log_console(s);
++
+ 	if (gd->flags & GD_FLG_DEVINIT)
+ 		console_puts_select(stderr, serial_only, s);
+ }
+@@ -382,6 +395,8 @@ static void console_puts(int file, const char *s)
+ 	int i;
+ 	struct stdio_dev *dev;
+ 
++	gkiw_log_console(s);
++
+ 	for_each_console_dev(i, file, dev) {
+ 		if (dev->puts != NULL)
+ 			dev->puts(dev, s);
+diff --git a/include/gkiw.h b/include/gkiw.h
+index 8cc0d2ae..4563690d 100644
+--- a/include/gkiw.h
++++ b/include/gkiw.h
+@@ -4,6 +4,8 @@
+ 
+ struct pt_regs;
+ 
++void gkiw_log_console(const char *s);
++void gkiw_log_console_char(char c);
+ void gkiw_log_crash(struct pt_regs *regs);
+ 
+ #endif /* __GKIW_H */

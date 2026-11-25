@@ -1,9 +1,9 @@
 diff --git a/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts b/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts
 new file mode 100644
-index 00000000..ac4f34de
+index 00000000..c22c1f75
 --- /dev/null
 +++ b/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,61 @@
 +// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 +/*
 + * gki_world development bootloader device tree for Amlogic G12A.
@@ -35,6 +35,22 @@ index 00000000..ac4f34de
 +		reg = <0x0 0x0 0x0 0x20000000>; /* 512 MiB lower bound */
 +	};
 +
++	reserved-memory {
++		ramoops@1c000000 {
++			compatible = "ramoops";
++			reg = <0x0 0x1c000000 0x0 0x00100000>;
++			record-size = <0x20000>;
++			console-size = <0x80000>;
++			pmsg-size = <0x40000>;
++			ftrace-size = <0x20000>;
++			no-map;
++		};
++
++		gkiw-log@1c100000 {
++			reg = <0x0 0x1c100000 0x0 0x00020000>;
++			no-map;
++		};
++	};
 +};
 +
 +/*

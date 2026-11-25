@@ -196,7 +196,9 @@ Order of investigation:
 
 Recovery path: `CONFIG_MAGIC_SYSRQ`, serial/earlycon where available, and a
 hardware watchdog with `nowayout=0` so a wedged boot resets instead of waiting
-for a human.
+for a human. During early bringup, do **not** let Linux take over the watchdog
+until a remote shell works: the bootloader-armed reset is the way out of a hung
+kernel. Enable the kernel watchdog deliberately once ssh is reliable.
 
 ## 7. Evidence and PR
 
