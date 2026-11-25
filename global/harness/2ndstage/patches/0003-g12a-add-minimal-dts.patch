@@ -1,0 +1,54 @@
+diff --git a/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts b/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts
+new file mode 100644
+index 00000000..086e0214
+--- /dev/null
++++ b/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts
+@@ -0,0 +1,48 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * gki_world development bootloader device tree for Amlogic G12A.
++ *
++ * Deliberately minimal: UART, USB gadget and the watchdog only. No eMMC, SD,
++ * Ethernet, display, audio, PCIe or other peripherals. The first 128 MiB are
++ * treated as owned by the secure world / first stage, and only 512 MiB of RAM
++ * are assumed, so the same tree works on the smallest boards.
++ */
++
++/dts-v1/;
++
++#include "meson-g12a.dtsi"
++
++/ {
++	model = "gki_world G12A development board";
++	compatible = "gkiw,g12a", "amlogic,g12a";
++
++	aliases {
++		serial0 = &uart_AO;
++	};
++
++	chosen {
++		stdout-path = "serial0:115200n8";
++	};
++
++	memory@0 {
++		device_type = "memory";
++		reg = <0x0 0x0 0x0 0x20000000>; /* 512 MiB lower bound */
++	};
++
++	reserved-memory {
++		secure@0 {
++			reg = <0x0 0x0 0x0 0x08000000>; /* first 128 MiB */
++			no-map;
++		};
++	};
++};
++
++&uart_AO {
++	pinctrl-0 = <&uart_ao_a_pins>;
++	pinctrl-names = "default";
++	status = "okay";
++};
++
++&usb {
++	status = "okay";
++};

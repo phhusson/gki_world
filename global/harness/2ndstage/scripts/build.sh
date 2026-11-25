@@ -69,4 +69,10 @@ make -C "$UBOOT_SRC" O="$BUILD" "$UBOOT_BASE_DEFCONFIG"
 make -C "$UBOOT_SRC" O="$BUILD" olddefconfig
 make -C "$UBOOT_SRC" O="$BUILD" -j"$JOBS" CROSS_COMPILE="$CROSS_COMPILE"
 
+GKIW_BOOTIMG_BASE="$GKIW_BOOTIMG_BASE" \
+GKIW_BOOTIMG_HEADER_SIZE="$GKIW_BOOTIMG_HEADER_SIZE" \
+GKIW_BOOTIMG_PAGESIZE="$GKIW_BOOTIMG_PAGESIZE" \
+"$ROOT/global/harness/2ndstage/scripts/mkbootimg.sh" \
+	"$BUILD/u-boot-dtb.bin" "$BUILD/gkiw-2ndstage-boot.img"
+
 echo "built: $BUILD/u-boot.bin"
