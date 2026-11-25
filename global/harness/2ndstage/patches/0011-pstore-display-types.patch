@@ -1,0 +1,16 @@
+diff --git a/drivers/fastboot/fb_command.c b/drivers/fastboot/fb_command.c
+index d50dbaa0..4c61d679 100644
+--- a/drivers/fastboot/fb_command.c
++++ b/drivers/fastboot/fb_command.c
+@@ -899,6 +899,11 @@ static void oem_pstore_display(char *cmd_parameter, char *response)
+ 
+ 	if (!*type)
+ 		type = "console";
++	if (!strcmp(type, "dmesg") || !strcmp(type, "panic") ||
++	    !strcmp(type, "oops"))
++		type = "dump";
++	else if (!strcmp(type, "pmsg"))
++		type = "user";
+ 	snprintf(cmd, sizeof(cmd), "pstore display %s", type);
+ 
+ 	console_record_reset();

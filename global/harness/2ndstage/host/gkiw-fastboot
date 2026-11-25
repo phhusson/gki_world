@@ -195,7 +195,8 @@ def main():
         help="run U-Boot's pstore decoder and print the decoded records",
     )
     display.add_argument(
-        "--type",
+        "type",
+        nargs="?",
         default="console",
         choices=["console", "dmesg", "pmsg", "ftrace"],
     )

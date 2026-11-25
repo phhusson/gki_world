@@ -97,15 +97,21 @@ hand:
 # decoded console records, over fastboot
 fastboot oem pstore-display:console
 fastboot oem pstore-display dmesg
+fastboot oem pstore-display pmsg
 global/harness/2ndstage/host/gkiw-fastboot pstore-display console
+global/harness/2ndstage/host/gkiw-fastboot pstore-display dmesg
 
 # or at the U-Boot prompt
 pstore display console
 pstore display dmesg
 ```
 
-`pstore display` prints the records the same way `/sys/fs/pstore` exposes them
-on a running Linux (`systemd-pstore` archives them there).
+U-Boot's record names are `dump`, `console`, `ftrace` and `user`; the OEM
+wrapper maps `dmesg`/`panic` to `dump` and `pmsg` to `user`. The Linux DT and
+`CONFIG_CMD_PSTORE_*` sizes must match; the G12A build keeps them in sync, so use
+the test image and 2ndstage from the same build. `pstore display` prints the
+records the same way `/sys/fs/pstore` exposes them on a running Linux
+(`systemd-pstore` archives them there).
 
 The G12A dev DT also reserves `0x1c100000..0x1c300000` for the 2ndstage log,
 so a Linux boot cannot overwrite it, and constrains `linux,cma` to 128–384 MiB
