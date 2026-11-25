@@ -88,6 +88,9 @@ static void setup_gadget(void)
 	mount("configfs", "/sys/kernel/config", "configfs", 0, NULL);
 
 	make_dir(GADGET);
+	make_dir(GADGET "/functions");
+	make_dir(GADGET "/configs");
+	make_dir(GADGET "/strings");
 	write_file(GADGET "/idVendor", "0x1b8e");
 	write_file(GADGET "/idProduct", "0xfada");
 	write_file(GADGET "/bcdUSB", "0x0200");
@@ -104,9 +107,17 @@ static void setup_gadget(void)
 	write_file(GADGET "/configs/c.1/MaxPower", "250");
 
 	make_dir(GADGET "/functions/acm.gs0");
-	if (symlink("functions/acm.gs0", GADGET "/configs/c.1/acm.gs0") &&
-	    errno != EEXIST)
+
+	/*
+	 * configfs resolves the symlink target relative to the caller's cwd.
+	 * Stand in the gadget root, as the usual shell setup does.
+	 */
+	if (chdir(GADGET)) {
+		logmsg("gkiw: chdir %s: %s\n", GADGET, strerror(errno));
+	} else if (symlink("functions/acm.gs0", "configs/c.1/acm.gs0") &&
+		   errno != EEXIST) {
 		logmsg("gkiw: symlink acm: %s\n", strerror(errno));
+	}
 
 	if (first_udc(udc, sizeof(udc))) {
 		logmsg("gkiw: no UDC found\n");
