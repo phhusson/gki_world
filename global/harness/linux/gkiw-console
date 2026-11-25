@@ -1,0 +1,14 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Open the gki_world Linux USB ACM shell.
+
+set -eu
+
+TTY=${GKIW_TTY:-/dev/ttyACM0}
+
+while [ ! -e "$TTY" ]; do
+	sleep 0.2
+done
+
+exec socat - "$TTY",raw,echo=0

@@ -197,8 +197,9 @@ Order of investigation:
 Recovery path: `CONFIG_MAGIC_SYSRQ`, serial/earlycon where available, and a
 hardware watchdog with `nowayout=0` so a wedged boot resets instead of waiting
 for a human. During early bringup, do **not** let Linux take over the watchdog
-until a remote shell works: the bootloader-armed reset is the way out of a hung
-kernel. Enable the kernel watchdog deliberately once ssh is reliable.
+until a reliable out-of-band path works — on the G12A dev loop that is the USB
+ACM shell (`socat - /dev/ttyACM0`), not ssh. Enable the kernel watchdog
+deliberately once that shell is reliable.
 
 ## 7. Evidence and PR
 

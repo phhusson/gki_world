@@ -175,12 +175,15 @@ before booting.
 
 ### Do not take over the watchdog yet
 
-Until **ssh into Linux works**, the Linux kernel MUST NOT enable or pet the
-watchdog. The 60 s reset is the only way out of a hung kernel; if Linux takes
-over the timer, a wedged boot stops coming back and the loop needs a physical
-power cycle. Keep `CONFIG_MESON_WATCHDOG` off (and do not load it from the
-initramfs) until a remote shell is reliable. Then enable it deliberately, either
-in-kernel or with a userspace watchdog.
+Until the **USB ACM shell** is reachable from the host (`socat - /dev/ttyACM0`
+answers), the Linux kernel MUST NOT enable or pet the watchdog. The 60 s reset
+is the only way out of a hung kernel; if Linux takes over the timer, a wedged
+boot stops coming back and the loop needs a physical power cycle. Keep
+`CONFIG_MESON_WATCHDOG` off (and do not load it from the initramfs) until the
+shell is reliable. Then enable it deliberately, either in-kernel or with a
+userspace watchdog.
+
+See [global/harness/linux](../linux/README.md) for the ACM shell setup.
 
 ## Second-stage console log
 
