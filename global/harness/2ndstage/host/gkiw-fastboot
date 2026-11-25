@@ -14,6 +14,7 @@ import subprocess
 import sys
 
 INFO_RE = re.compile(r"^\(bootloader\) ([0-9a-fA-F]+):([0-9a-fA-F]+)\s*$")
+LINE_RE = re.compile(r"^\(bootloader\) ([0-9a-fA-F]+):(.*)$")
 
 
 def fastboot(args, serial=None):
@@ -85,6 +86,32 @@ def parse_log_slot(data):
     return seq, bytes(text)
 
 
+def cmd_pstore_display(args):
+    proc = fastboot(["oem", f"pstore-display:{args.type}"], args.serial)
+    output = proc.stdout + proc.stderr
+    lines = {}
+    for line in output.splitlines():
+        match = LINE_RE.match(line.strip())
+        if not match:
+            continue
+        number = int(match.group(1), 16)
+        lines.setdefault(number, []).append(match.group(2))
+
+    if not lines:
+        sys.stderr.write(output)
+        print("no pstore display data received", file=sys.stderr)
+        return 1
+
+    text = "".join("".join(lines[n]) + "\n" for n in sorted(lines))
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(text)
+        print(f"wrote {len(text)} bytes to {args.output}")
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
 def cmd_log(args):
     addr = int(args.addr, 0)
     size = int(args.size, 0)
@@ -109,7 +136,16 @@ def cmd_log(args):
             sys.stdout.buffer.write(b"\n")
         return 0
 
-    print("no 2ndstage log found", file=sys.stderr)
+    def diag(slot):
+        if len(slot) < 24:
+            return "short"
+        magic, head, used, cap, seq, _ = struct.unpack_from("<IIIIII", slot, 0)
+        return f"magic={magic:#x} head={head} used={used} size={cap} seq={seq}"
+
+    print(
+        f"no 2ndstage log found; slot0 {diag(slots[0])}; slot1 {diag(slots[1])}",
+        file=sys.stderr,
+    )
     return 1
 
 
@@ -153,6 +189,18 @@ def main():
         help="show the current boot slot instead of the previous one",
     )
     log.set_defaults(func=cmd_log)
+
+    display = sub.add_parser(
+        "pstore-display",
+        help="run U-Boot's pstore decoder and print the decoded records",
+    )
+    display.add_argument(
+        "--type",
+        default="console",
+        choices=["console", "dmesg", "pmsg", "ftrace"],
+    )
+    display.add_argument("-o", "--output")
+    display.set_defaults(func=cmd_pstore_display)
 
     args = parser.parse_args()
     sys.exit(args.func(args))

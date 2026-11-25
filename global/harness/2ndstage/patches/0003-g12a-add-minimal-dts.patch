@@ -1,6 +1,6 @@
 diff --git a/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts b/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts
 new file mode 100644
-index 00000000..96070e32
+index 00000000..ff259e95
 --- /dev/null
 +++ b/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts
 @@ -0,0 +1,71 @@
@@ -51,8 +51,8 @@ index 00000000..96070e32
 +			reg = <0x0 0x1c000000 0x0 0x00100000>;
 +			record-size = <0x20000>;
 +			console-size = <0x80000>;
-+			pmsg-size = <0x40000>;
-+			ftrace-size = <0x20000>;
++			pmsg-size = <0x10000>;
++			ftrace-size = <0x10000>;
 +			no-map;
 +		};
 +

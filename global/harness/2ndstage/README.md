@@ -55,6 +55,7 @@ boards the bootloader and Linux trees must not add a UART pinctrl node.
 | boot a kernel | `fastboot boot boot.img` |
 | read pstore | `fastboot oem pstore:<addr>:<size>` |
 | read 2ndstage console log | `gkiw log` or host `gkiw-fastboot log` |
+| decode Linux pstore | `fastboot oem pstore-display:console` |
 | reset on hang | watchdog armed in `fastboot_preboot()` |
 | manual watchdog | `gkiw watchdog [ms\|off]` on the UART |
 
@@ -88,6 +89,23 @@ reserved-memory {
 
 The region must survive the first-stage bootloader. On G12A the vendor first
 stage initializes DDR and does not scrub RAM, so the data survives a reset.
+
+U-Boot has its own pstore/ramoops decoder, so do not parse the raw region by
+hand:
+
+```sh
+# decoded console records, over fastboot
+fastboot oem pstore-display:console
+fastboot oem pstore-display dmesg
+global/harness/2ndstage/host/gkiw-fastboot pstore-display console
+
+# or at the U-Boot prompt
+pstore display console
+pstore display dmesg
+```
+
+`pstore display` prints the records the same way `/sys/fs/pstore` exposes them
+on a running Linux (`systemd-pstore` archives them there).
 
 The G12A dev DT also reserves `0x1c100000..0x1c300000` for the 2ndstage log,
 so a Linux boot cannot overwrite it, and constrains `linux,cma` to 128–384 MiB

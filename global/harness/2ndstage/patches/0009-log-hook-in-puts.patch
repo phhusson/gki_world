@@ -1,0 +1,90 @@
+diff --git a/cmd/gkiw.c b/cmd/gkiw.c
+index 7f8ea8b7..37035904 100644
+--- a/cmd/gkiw.c
++++ b/cmd/gkiw.c
+@@ -155,14 +155,26 @@ static bool gkiw_log_valid(struct gkiw_log_hdr *hdr)
+ 	       hdr->size <= GKIW_LOG_CAPACITY && hdr->used <= hdr->size;
+ }
+ 
+-static void gkiw_log_print(int slot, const char *label)
++static void gkiw_log_diag(void)
++{
++	struct gkiw_log_hdr *a = gkiw_log_slot(0);
++	struct gkiw_log_hdr *b = gkiw_log_slot(1);
++
++	gkiw_log_suspend = true;
++	printf("gkiw: no valid log; slot0 magic=%08x head=%u used=%u size=%u; slot1 magic=%08x head=%u used=%u size=%u\n",
++	       a->magic, a->head, a->used, a->size,
++	       b->magic, b->head, b->used, b->size);
++	gkiw_log_suspend = false;
++}
++
++static bool gkiw_log_print(int slot, const char *label)
+ {
+ 	struct gkiw_log_hdr *hdr = gkiw_log_slot(slot);
+ 	char *data = gkiw_log_text(hdr);
+ 	u32 start, i;
+ 
+ 	if (!gkiw_log_valid(hdr))
+-		return;
++		return false;
+ 
+ 	gkiw_log_suspend = true;
+ 	printf("--- %s 2ndstage log (seq %u) ---\n", label, hdr->seq);
+@@ -172,11 +184,13 @@ static void gkiw_log_print(int slot, const char *label)
+ 	if (hdr->used && data[(start + hdr->used - 1) % hdr->size] != '\n')
+ 		putc('\n');
+ 	gkiw_log_suspend = false;
++	return true;
+ }
+ 
+ static int gkiw_do_log(int argc, char *const argv[])
+ {
+ 	struct gkiw_log_hdr *prev = gkiw_log_slot(0);
++	struct gkiw_log_hdr *cur = gkiw_log_slot(1);
+ 
+ 	if (argc == 2 && !strcmp(argv[1], "clear")) {
+ 		gkiw_log_suspend = true;
+@@ -196,14 +210,18 @@ static int gkiw_do_log(int argc, char *const argv[])
+ 				CONFIG_GKIW_LOG_ADDR + CONFIG_GKIW_LOG_SIZE);
+ 
+ 	if (argc == 2 && !strcmp(argv[1], "current")) {
+-		gkiw_log_print(1, "current");
++		if (!gkiw_log_print(1, "current"))
++			gkiw_log_diag();
+ 	} else if (argc == 2 && !strcmp(argv[1], "previous")) {
+-		gkiw_log_print(0, "previous");
++		if (!gkiw_log_print(0, "previous"))
++			gkiw_log_diag();
+ 	} else if (argc == 1) {
+ 		if (gkiw_log_valid(prev))
+ 			gkiw_log_print(0, "previous");
+-		else
++		else if (gkiw_log_valid(cur))
+ 			gkiw_log_print(1, "current");
++		else
++			gkiw_log_diag();
+ 	} else {
+ 		return CMD_RET_USAGE;
+ 	}
+diff --git a/common/console.c b/common/console.c
+index e88327af..281e4f63 100644
+--- a/common/console.c
++++ b/common/console.c
+@@ -395,8 +395,6 @@ static void console_puts(int file, const char *s)
+ 	int i;
+ 	struct stdio_dev *dev;
+ 
+-	gkiw_log_console(s);
+-
+ 	for_each_console_dev(i, file, dev) {
+ 		if (dev->puts != NULL)
+ 			dev->puts(dev, s);
+@@ -778,6 +776,7 @@ void puts(const char *s)
+ 	if (!gd)
+ 		return;
+ 
++	gkiw_log_console(s);
+ 	console_record_puts(s);
+ 
+ 	/* sandbox can send characters to stdout before it has a console */

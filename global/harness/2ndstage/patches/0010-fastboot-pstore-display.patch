@@ -1,0 +1,203 @@
+diff --git a/drivers/fastboot/Kconfig b/drivers/fastboot/Kconfig
+index c253408f..a8bde669 100644
+--- a/drivers/fastboot/Kconfig
++++ b/drivers/fastboot/Kconfig
+@@ -353,6 +353,15 @@ config FASTBOOT_CMD_OEM_PSTORE
+ 	  is intended for pulling pstore/ramoops data left by the previous
+ 	  boot: the host sends "oem pstore:<addr>:<size>".
+ 
++config FASTBOOT_CMD_OEM_PSTORE_DISPLAY
++	bool "Enable the 'oem pstore-display' command"
++	depends on CMD_PSTORE
++	default y
++	help
++	  Run "pstore display <type>" and stream its console output over
++	  fastboot INFO responses. Accepts both "oem pstore-display:<type>"
++	  and "oem pstore-display <type>" forms.
++
+ config FASTBOOT_OEM_BOARD
+ 	bool "Enable the 'oem board' command"
+ 	help
+diff --git a/drivers/fastboot/fb_command.c b/drivers/fastboot/fb_command.c
+index e8ebe425..d50dbaa0 100644
+--- a/drivers/fastboot/fb_command.c
++++ b/drivers/fastboot/fb_command.c
+@@ -60,6 +60,14 @@ static void oem_board(char *, char *);
+ static void oem_pstore(char *, char *);
+ static void oem_pstore_next(char *response);
+ #endif
++#if CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE_DISPLAY)
++static void oem_pstore_display(char *, char *);
++static void oem_pstore_display_next(char *response);
++static void oem_pstore_display_console(char *, char *);
++static void oem_pstore_display_dmesg(char *, char *);
++static void oem_pstore_display_pmsg(char *, char *);
++static void oem_pstore_display_ftrace(char *, char *);
++#endif
+ static void run_ucmd(char *, char *);
+ static void run_acmd(char *, char *);
+ #if CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING)
+@@ -196,6 +204,31 @@ static const struct fastboot_command commands[FASTBOOT_COMMAND_COUNT] = {
+ 		.command = "oem pstore",
+ 		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE, (oem_pstore), (NULL))
+ 	},
++	[FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY] = {
++		.command = "oem pstore-display",
++		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE_DISPLAY,
++					     (oem_pstore_display), (NULL))
++	},
++	[FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_CONSOLE] = {
++		.command = "oem pstore-display console",
++		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE_DISPLAY,
++					     (oem_pstore_display_console), (NULL))
++	},
++	[FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_DMESG] = {
++		.command = "oem pstore-display dmesg",
++		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE_DISPLAY,
++					     (oem_pstore_display_dmesg), (NULL))
++	},
++	[FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_PMSG] = {
++		.command = "oem pstore-display pmsg",
++		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE_DISPLAY,
++					     (oem_pstore_display_pmsg), (NULL))
++	},
++	[FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_FTRACE] = {
++		.command = "oem pstore-display ftrace",
++		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE_DISPLAY,
++					     (oem_pstore_display_ftrace), (NULL))
++	},
+ 	[FASTBOOT_COMMAND_UCMD] = {
+ 		.command = "UCmd",
+ 		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_UUU_SUPPORT, (run_ucmd), (NULL))
+@@ -287,6 +320,16 @@ void fastboot_multiresponse(int cmd, char *response)
+ 			break;
+ 		}
+ 		fallthrough;
++	case FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY:
++	case FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_CONSOLE:
++	case FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_DMESG:
++	case FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_PMSG:
++	case FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_FTRACE:
++		if (CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE_DISPLAY)) {
++			oem_pstore_display_next(response);
++			break;
++		}
++		fallthrough;
+ 	default:
+ 		fastboot_fail("Unknown multiresponse command", response);
+ 		break;
+@@ -839,6 +882,98 @@ static void oem_pstore_next(char *response)
+ }
+ #endif
+ 
++#if CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE_DISPLAY)
++#define PSTORE_DISPLAY_CHUNK	48
++#define PSTORE_DISPLAY_LINE	512
++
++static char pstore_display_buf[PSTORE_DISPLAY_LINE];
++static u32 pstore_display_off;
++static u32 pstore_display_len;
++static u32 pstore_display_line;
++static bool pstore_display_active;
++
++static void oem_pstore_display(char *cmd_parameter, char *response)
++{
++	char cmd[64];
++	const char *type = cmd_parameter ? cmd_parameter : "console";
++
++	if (!*type)
++		type = "console";
++	snprintf(cmd, sizeof(cmd), "pstore display %s", type);
++
++	console_record_reset();
++	run_command(cmd, 0);
++
++	pstore_display_off = 0;
++	pstore_display_len = 0;
++	pstore_display_line = 0;
++	pstore_display_active = true;
++	fastboot_response(FASTBOOT_MULTIRESPONSE_START, response, NULL);
++}
++
++static void oem_pstore_display_next(char *response)
++{
++	u32 n;
++	int ret;
++
++	if (!pstore_display_active) {
++		fastboot_fail("no pstore display request", response);
++		return;
++	}
++
++	while (pstore_display_off == pstore_display_len) {
++		if (console_record_isempty()) {
++			pstore_display_active = false;
++			fastboot_okay(NULL, response);
++			return;
++		}
++		ret = console_record_readline(pstore_display_buf,
++					      sizeof(pstore_display_buf));
++		if (ret < 0) {
++			pstore_display_active = false;
++			fastboot_fail("pstore display overflow", response);
++			return;
++		}
++		pstore_display_len = ret;
++		pstore_display_off = 0;
++		while (pstore_display_len > 0 &&
++		       (pstore_display_buf[pstore_display_len - 1] == '\n' ||
++			pstore_display_buf[pstore_display_len - 1] == '\r'))
++			pstore_display_len--;
++		if (pstore_display_len)
++			pstore_display_line++;
++	}
++
++	n = pstore_display_len - pstore_display_off;
++	if (n > PSTORE_DISPLAY_CHUNK)
++		n = PSTORE_DISPLAY_CHUNK;
++	fastboot_response("INFO", response, "%x:%.*s",
++			  pstore_display_line, n,
++			  pstore_display_buf + pstore_display_off);
++	pstore_display_off += n;
++}
++
++static void oem_pstore_display_console(char *p, char *response)
++{
++	oem_pstore_display("console", response);
++}
++
++static void oem_pstore_display_dmesg(char *p, char *response)
++{
++	oem_pstore_display("dmesg", response);
++}
++
++static void oem_pstore_display_pmsg(char *p, char *response)
++{
++	oem_pstore_display("pmsg", response);
++}
++
++static void oem_pstore_display_ftrace(char *p, char *response)
++{
++	oem_pstore_display("ftrace", response);
++}
++#endif
++
+ #if CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING)
+ /**
+  * flashing_flash_dev() - block device of the fastboot flash back end
+diff --git a/include/fastboot.h b/include/fastboot.h
+index fdcf6525..cf403478 100644
+--- a/include/fastboot.h
++++ b/include/fastboot.h
+@@ -52,6 +52,11 @@ enum {
+ 	FASTBOOT_COMMAND_OEM_CONSOLE,
+ 	FASTBOOT_COMMAND_OEM_BOARD,
+ 	FASTBOOT_COMMAND_OEM_PSTORE,
++	FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY,
++	FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_CONSOLE,
++	FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_DMESG,
++	FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_PMSG,
++	FASTBOOT_COMMAND_OEM_PSTORE_DISPLAY_FTRACE,
+ 	FASTBOOT_COMMAND_ACMD,
+ 	FASTBOOT_COMMAND_UCMD,
+ 	FASTBOOT_COMMAND_FLASHING_LOCK,
