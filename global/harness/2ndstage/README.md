@@ -172,20 +172,14 @@ SErrors and bad-mode exceptions. A plain `panic()` path is not captured yet.
 
 ```sh
 global/harness/2ndstage/scripts/build.sh
-# -> .bootloader/build-g12a/gkiw-2ndstage-boot.img      (v0, vendor chainload)
-#    .bootloader/build-g12a/gkiw-2ndstage-selfboot.img  (v2 + DTB, fastboot boot)
+# -> .bootloader/build-g12a/gkiw-2ndstage-flash.img  (v0, stock first stage)
 #    .bootloader/build-g12a/u-boot.bin
 ```
 
-The v0 image is for the stock first stage. The v2 image exists so the running
-second stage can chainload itself with a valid FDT:
-
-```sh
-fastboot boot gkiw-2ndstage-selfboot.img
-```
-
-Without the DTB, U-Boot logs `header_version must be >= 2 to get dtb` and
-`Working FDT set to 0`.
+The v0 image is for the stock first stage. Self-chainloading was dropped: it
+needed a second image, a separate DTB and a special `booti` path for very little
+gain. `fastboot reboot-bootloader` resets instead; the first stage reloads the
+flashed image and comes back here.
 
 `serial#` is derived from the Amlogic secure-monitor chip serial and exposed as
 fastboot `serialno`; `board` is set to `gkiw-g12a`, which becomes the fastboot
@@ -201,7 +195,7 @@ The source tree (`.bootloader/u-boot`) is managed: every run resets it to
 
 ### Boot image
 
-`gkiw-2ndstage-boot.img` is an Android v0 boot image: kernel load address
+`gkiw-2ndstage-flash.img` is an Android v0 boot image: kernel load address
 `0x08000000`, page size 2048, empty ramdisk. The kernel is:
 
 ```text
@@ -249,14 +243,11 @@ but not a new build of the gkiw patches.
 
 ```sh
 # once: make the stock first stage chainload the second stage
-fastboot flash boot gkiw-2ndstage-boot.img
+fastboot flash boot gkiw-2ndstage-flash.img
 # (or `fastboot boot` it, if the stock bootloader supports that)
-```
 
-Self-boot check from the running second stage:
-
-```sh
-fastboot boot gkiw-2ndstage-selfboot.img
+# come back to this second stage after a Linux test or crash
+fastboot reboot-bootloader
 ```
 
 After it enumerates:
@@ -285,6 +276,9 @@ global/harness/2ndstage/host/gkiw-fastboot pstore \
   beyond 65 s.
 - **Android boot image only.** `fastboot boot` goes through U-Boot's Android
   image parser. Pack kernel/DT/initramfs with `mkbootimg`, not as raw files.
+- **No vendor fastboot.** The 2ndstage cannot restore the stock U-Boot. A reset
+  goes through the first stage and reloads the flashed `gkiw-2ndstage-flash.img`;
+  use the vendor's own key combo/recovery path if you need its fastboot.
 - **Arbitrary RAM read.** `oem pstore` reads any address the host asks for. It
   is a development tool: never ship it, never leave it reachable on a device you
   do not control.

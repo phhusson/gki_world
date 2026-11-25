@@ -7,9 +7,9 @@
 # The kernel is:
 #
 #   0x0000 .. 0x0fff   ARM64 Linux Image header (code0 branches to 0x1000)
-#   0x1000 ..          u-boot-dtb.bin, linked at 0x01001000
+#   0x1000 ..          u-boot-dtb.bin, linked at 0x08001000
 #
-# so the image loads at 0x01000000 and executes the header, which branches to
+# so the image loads at 0x08000000 and executes the header, which branches to
 # the U-Boot payload. `booti` sees a normal ARM64 Image and does not relocate
 # it because flags bit 3 is set.
 #
@@ -19,17 +19,9 @@ set -eu
 
 PAYLOAD=$1
 OUTPUT=$2
-DTB=${3:-}
-HEADER_VERSION=${4:-0}
-DTB_OFFSET=${GKIW_BOOTIMG_DTB_OFFSET:-0x00100000}
 
 [ -f "$PAYLOAD" ] || {
 	echo "mkbootimg: missing payload: $PAYLOAD" >&2
-	exit 1
-}
-
-[ -z "$DTB" ] || [ -f "$DTB" ] || {
-	echo "mkbootimg: missing dtb: $DTB" >&2
 	exit 1
 }
 
@@ -88,19 +80,13 @@ PY
 
 : > "$EMPTY"
 
-set -- \
+mkbootimg \
 	--kernel "$KERNEL" \
 	--ramdisk "$EMPTY" \
 	--base "$GKIW_BOOTIMG_BASE" \
 	--kernel_offset 0x0 \
-	--pagesize "$GKIW_BOOTIMG_PAGESIZE"
-
-if [ -n "$DTB" ]; then
-	set -- "$@" --dtb "$DTB" --dtb_offset "$DTB_OFFSET"
-fi
-
-mkbootimg "$@" \
-	--header_version "$HEADER_VERSION" \
+	--pagesize "$GKIW_BOOTIMG_PAGESIZE" \
+	--header_version 0 \
 	--output "$OUTPUT"
 
 echo "built: $OUTPUT"

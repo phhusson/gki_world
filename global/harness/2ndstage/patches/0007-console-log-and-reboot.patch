@@ -1,0 +1,142 @@
+diff --git a/board/amlogic/u200/u200.c b/board/amlogic/u200/u200.c
+index 473fe6e3..2ba8df2e 100644
+--- a/board/amlogic/u200/u200.c
++++ b/board/amlogic/u200/u200.c
+@@ -5,7 +5,9 @@
+  */
+ 
+ #include <dm.h>
++#include <console.h>
+ #include <env.h>
++#include <fastboot.h>
+ #include <init.h>
+ #include <net.h>
+ #include <vsprintf.h>
+@@ -28,6 +30,11 @@ int meson_board_late_init(void)
+ 	char serial_hex[2 * SM_SERIAL_SIZE + 1];
+ 	int i;
+ 
++#if CONFIG_IS_ENABLED(CONSOLE_RECORD)
++	/* Start a clean recording for the fastboot session and crash log. */
++	console_record_reset_enable();
++#endif
++
+ 	if (!meson_sm_get_serial(serial, sizeof(serial))) {
+ 		for (i = 0; i < SM_SERIAL_SIZE; i++)
+ 			sprintf(serial_hex + 2 * i, "%02x", serial[i]);
+@@ -39,3 +46,12 @@ int meson_board_late_init(void)
+ 
+ 	return 0;
+ }
++
++/*
++ * No BCB storage in the dev bootloader. A reset makes the first stage reload
++ * this boot image, i.e. `fastboot reboot-bootloader` comes back here.
++ */
++int fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
++{
++	return 0;
++}
+diff --git a/cmd/gkiw.c b/cmd/gkiw.c
+index c6a189d1..0b5ab61a 100644
+--- a/cmd/gkiw.c
++++ b/cmd/gkiw.c
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include <command.h>
++#include <console.h>
+ #include <cpu_func.h>
+ #include <dm.h>
+ #include <gkiw.h>
+@@ -56,9 +57,12 @@ static void gkiw_log_sync(void)
+ void gkiw_log_crash(struct pt_regs *regs)
+ {
+ 	struct gkiw_log_hdr *hdr = gkiw_log_header();
++	char *data = gkiw_log_data();
++	u32 cap = gkiw_log_capacity();
++	u32 used = 0;
+ 	static char buf[1024];
+ 	u32 seq = 0;
+-	int used = 0;
++	int len = 0;
+ 	int ret;
+ 	int i;
+ 
+@@ -69,28 +73,45 @@ void gkiw_log_crash(struct pt_regs *regs)
+ 		seq = hdr->seq;
+ 	seq++;
+ 
+-	ret = snprintf(buf + used, sizeof(buf) - used,
++#if CONFIG_IS_ENABLED(CONSOLE_RECORD)
++	{
++		u32 console_cap = cap > sizeof(buf) ? cap - sizeof(buf) : 0;
++
++		while (used + 1 < console_cap && !console_record_isempty()) {
++			ret = console_record_readline(data + used,
++						      console_cap - used);
++			if (ret <= 0)
++				break;
++			used += ret;
++		}
++		if (used > 0 && data[used - 1] != '\n' && used < console_cap)
++			data[used++] = '\n';
++	}
++#endif
++
++	ret = snprintf(buf + len, sizeof(buf) - len,
+ 		       "gkiw 2ndstage crash #%u\nesr=0x%016lx elr=0x%016lx spsr=0x%016lx\n",
+ 		       seq, regs->esr, regs->elr, regs->spsr);
+ 	if (ret > 0)
+-		used += ret;
+-	if (used >= (int)sizeof(buf))
+-		used = sizeof(buf);
++		len += ret;
++	if (len >= (int)sizeof(buf))
++		len = sizeof(buf);
+ 
+-	for (i = 0; i < 31 && used < (int)sizeof(buf); i++) {
+-		ret = snprintf(buf + used, sizeof(buf) - used,
++	for (i = 0; i < 31 && len < (int)sizeof(buf); i++) {
++		ret = snprintf(buf + len, sizeof(buf) - len,
+ 			       "x%-2d=0x%016lx%s", i, regs->regs[i],
+ 			       (i & 1) ? "\n" : " ");
+ 		if (ret > 0)
+-			used += ret;
++			len += ret;
+ 	}
+-	if (used >= (int)sizeof(buf))
+-		used = sizeof(buf);
++	if (len >= (int)sizeof(buf))
++		len = sizeof(buf);
+ 
+-	if (used > (int)gkiw_log_capacity())
+-		used = gkiw_log_capacity();
++	if (used + len > cap)
++		len = cap - used;
++	memcpy(data + used, buf, len);
++	used += len;
+ 
+-	memcpy(gkiw_log_data(), buf, used);
+ 	hdr->len = used;
+ 	hdr->seq = seq;
+ 	hdr->magic = GKIW_LOG_MAGIC;
+diff --git a/drivers/fastboot/Kconfig b/drivers/fastboot/Kconfig
+index 6e34812f..c253408f 100644
+--- a/drivers/fastboot/Kconfig
++++ b/drivers/fastboot/Kconfig
+@@ -18,6 +18,14 @@ config FASTBOOT
+ 	  commands to be executed on request. The CMDLINE option is required
+ 	  for anything other than simply booting the OS.
+ 
++config FASTBOOT_REBOOT
++	bool "Enable fastboot reboot commands"
++	default y
++	help
++	  Enable the reboot, reboot-bootloader and reboot-recovery commands.
++	  Boards without a BCB can override fastboot_set_reboot_flag() and
++	  simply reset.
++
+ config USB_FUNCTION_FASTBOOT
+ 	bool "Enable USB fastboot gadget"
+ 	depends on USB_GADGET
