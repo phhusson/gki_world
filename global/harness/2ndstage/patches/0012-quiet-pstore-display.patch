@@ -1,0 +1,91 @@
+diff --git a/cmd/gkiw.c b/cmd/gkiw.c
+index 37035904..119c20bd 100644
+--- a/cmd/gkiw.c
++++ b/cmd/gkiw.c
+@@ -109,6 +109,11 @@ void gkiw_log_console(const char *s)
+ 		gkiw_log_console_char(*s++);
+ }
+ 
++void gkiw_log_pause(bool pause)
++{
++	gkiw_log_suspend = pause;
++}
++
+ /*
+  * Called from the ARM64 exception path before the register dump is printed.
+  * The console is already in the ring; append the reason and registers.
+diff --git a/common/console.c b/common/console.c
+index 281e4f63..cc99ecca 100644
+--- a/common/console.c
++++ b/common/console.c
+@@ -38,6 +38,10 @@ void __weak gkiw_log_console_char(char c)
+ {
+ }
+ 
++void __weak gkiw_log_pause(bool pause)
++{
++}
++
+ static int on_console(const char *name, const char *value, enum env_op op,
+ 	int flags)
+ {
+diff --git a/drivers/fastboot/fb_command.c b/drivers/fastboot/fb_command.c
+index 4c61d679..c8d6249d 100644
+--- a/drivers/fastboot/fb_command.c
++++ b/drivers/fastboot/fb_command.c
+@@ -9,6 +9,7 @@
+ #include <env.h>
+ #include <fastboot.h>
+ #include <fastboot-internal.h>
++#include <gkiw.h>
+ #include <fb_block.h>
+ #include <fb_mmc.h>
+ #include <fb_nand.h>
+@@ -19,6 +20,8 @@
+ #include <video_console.h>
+ #include <vsprintf.h>
+ #include <linux/printk.h>
++
++DECLARE_GLOBAL_DATA_PTR;
+ #if CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING)
+ #include <avb_verify.h>
+ #include <blk.h>
+@@ -894,6 +897,7 @@ static bool pstore_display_active;
+ 
+ static void oem_pstore_display(char *cmd_parameter, char *response)
+ {
++	ulong flags;
+ 	char cmd[64];
+ 	const char *type = cmd_parameter ? cmd_parameter : "console";
+ 
+@@ -906,8 +910,18 @@ static void oem_pstore_display(char *cmd_parameter, char *response)
+ 		type = "user";
+ 	snprintf(cmd, sizeof(cmd), "pstore display %s", type);
+ 
++	/*
++	 * Keep the decoded records off the 115200 UART and out of the
++	 * persistent 2ndstage log. The console record still captures them
++	 * for the fastboot stream.
++	 */
++	gkiw_log_pause(true);
++	flags = gd->flags;
++	gd->flags |= GD_FLG_SILENT;
+ 	console_record_reset();
+ 	run_command(cmd, 0);
++	gd->flags = flags;
++	gkiw_log_pause(false);
+ 
+ 	pstore_display_off = 0;
+ 	pstore_display_len = 0;
+diff --git a/include/gkiw.h b/include/gkiw.h
+index 4563690d..2f2c1d28 100644
+--- a/include/gkiw.h
++++ b/include/gkiw.h
+@@ -5,6 +5,7 @@
+ struct pt_regs;
+ 
+ void gkiw_log_console(const char *s);
++void gkiw_log_pause(bool pause);
+ void gkiw_log_console_char(char c);
+ void gkiw_log_crash(struct pt_regs *regs);
+ 

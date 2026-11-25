@@ -109,8 +109,12 @@ pstore display dmesg
 U-Boot's record names are `dump`, `console`, `ftrace` and `user`; the OEM
 wrapper maps `dmesg`/`panic` to `dump` and `pmsg` to `user`. The Linux DT and
 `CONFIG_CMD_PSTORE_*` sizes must match; the G12A build keeps them in sync, so use
-the test image and 2ndstage from the same build. `pstore display` prints the
-records the same way `/sys/fs/pstore` exposes them on a running Linux
+the test image and 2ndstage from the same build.
+
+While decoding, the wrapper silences the UART and pauses the persistent 2ndstage
+log; only the fastboot stream receives the records. This avoids dumping the
+whole log at 115200 baud and keeps the operation fast. `pstore display` prints
+the records the same way `/sys/fs/pstore` exposes them on a running Linux
 (`systemd-pstore` archives them there).
 
 The G12A dev DT also reserves `0x1c100000..0x1c300000` for the 2ndstage log,
