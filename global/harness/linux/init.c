@@ -17,6 +17,8 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 
 #define GADGET "/sys/kernel/config/usb_gadget/g1"
@@ -129,6 +131,18 @@ static void setup_gadget(void)
 		logmsg("gkiw: ACM gadget bound to %s\n", udc);
 }
 
+static void install_applets(void)
+{
+	pid_t pid = fork();
+
+	if (pid == 0) {
+		execl("/bin/busybox", "busybox", "--install", "-s", "/bin", NULL);
+		_exit(127);
+	}
+	if (pid > 0)
+		waitpid(pid, NULL, 0);
+}
+
 int main(void)
 {
 	int fd = -1;
@@ -160,6 +174,23 @@ int main(void)
 	dup2(fd, 0);
 	dup2(fd, 1);
 	dup2(fd, 2);
+
+	install_applets();
+	setenv("PATH", "/bin:/sbin:/usr/bin:/usr/sbin", 1);
+	setenv("HOME", "/", 1);
+	setenv("TERM", "linux", 1);
+
+	{
+		struct termios tio;
+
+		if (!tcgetattr(fd, &tio)) {
+			cfmakeraw(&tio);
+			tio.c_oflag |= OPOST | ONLCR;
+			tcsetattr(fd, TCSANOW, &tio);
+		}
+	}
+
+	chdir("/");
 
 	logmsg("\n\ngkiw: USB ACM shell ready on /dev/ttyGS0\n");
 	logmsg("gkiw: host: socat - /dev/ttyACM0,raw,echo=0\n\n");
