@@ -23,11 +23,13 @@ reimplementing all of that before the first kernel boots.
 The fork is deliberately thin:
 
 ```text
-pinned U-Boot commit + 3 small patches
-  - gkiw command: pstore hex dump and watchdog control (UART)
+pinned U-Boot commit + small patches
+  - gkiw command: pstore hex dump, watchdog control, crash log
   - fastboot oem pstore: multiresponse chunked RAM read
   - fastboot preboot hook: arm the watchdog before bootm
   - minimal G12A devicetree: UART, DWC2 gadget, watchdog only
+  - 512 MiB floor, no relocation, Amlogic chip serial as fastboot serialno
+  - ARM64 exception hook writing the persistent 2ndstage crash log
 ```
 
 Nothing else is forked. Rebase by bumping `uboot.conf` and refreshing the
@@ -52,6 +54,7 @@ boards the bootloader and Linux trees must not add a UART pinctrl node.
 |------|-----------|
 | boot a kernel | `fastboot boot boot.img` |
 | read pstore | `fastboot oem pstore:<addr>:<size>` |
+| read 2ndstage crash log | `gkiw log` or `oem pstore:0x1c100000:0x10000` |
 | reset on hang | watchdog armed in `fastboot_preboot()` |
 | manual watchdog | `gkiw watchdog [ms\|off]` on the UART |
 
@@ -92,7 +95,8 @@ The prototype memory map is part of the contract:
 |--------|---------|-------|
 | secure world / first stage | `0x00000000..0x08000000` | first 128 MiB, never used for data |
 | fastboot buffer | `0x10000000..0x18000000` | 128 MiB |
-| pstore | `0x1c000000..0x1c100000` | 1 MiB |
+| Linux pstore | `0x1c000000..0x1c100000` | 1 MiB |
+| 2ndstage crash log | `0x1c100000..0x1c200000` | 64 KiB |
 | initial stack | `0x20000000` | top of the 512 MiB assumption |
 
 The bootloader assumes **at least 512 MiB of RAM** and does not parse the real
@@ -125,13 +129,44 @@ the safe window, and reuse the three generic patches unchanged.
 ## Watchdog
 
 `fastboot_preboot()` arms the first watchdog device for 60 seconds before
-`bootm`. Linux's `meson_gxbb_wdt` driver then takes over and pets it; if Linux
-hangs before that, the board resets. The Meson counter is 16-bit at 1 ms, so the
-maximum is about 65 seconds.
+`bootm`. `CONFIG_WATCHDOG=y` makes U-Boot **service** it while it is running:
+the fastboot loop calls `schedule()`, which runs the cyclic reset every second.
+When U-Boot jumps to Linux the cyclic servicing stops, the hardware timer keeps
+running, and Linux must take over within 60 seconds. If it does not, the board
+resets. The Meson counter is 16-bit at 1 ms, so the maximum is about 65 seconds.
 
-This is the intended behaviour for the development loop: a kernel that panics or
-wedges comes back on its own. For a boot that must not be interrupted, use
-`gkiw watchdog off` from the UART before booting.
+This is the intended behaviour for the development loop: U-Boot can wait in
+fastboot indefinitely, a kernel that panics or wedges comes back on its own, and
+a boot that must not be interrupted can use `gkiw watchdog off` from the UART
+before booting.
+
+## Second-stage crash log
+
+Before resetting on an ARM64 exception, U-Boot writes a text register dump to a
+persistent region outside its BSS/stack/heap and the Linux pstore:
+
+```text
+0x1c100000..0x1c200000   64 KiB, CONFIG_GKIW_LOG_ADDR/SIZE
+```
+
+The header is `GKLG`, a sequence number and the text length, followed by the
+exception reason, `esr`, `elr`, `spsr` and `x0..x30`. It is separate from
+ramoops, so a 2ndstage crash does not overwrite a Linux pstore record.
+
+On the next boot:
+
+```sh
+# over UART
+gkiw log
+gkiw log clear
+
+# or from the host, using the same chunked transport
+global/harness/2ndstage/host/gkiw-fastboot pstore \
+    --addr 0x1c100000 --size 0x10000 -o 2ndstage-crash.bin
+```
+
+The exception hook runs from `show_regs()`, so it captures synchronous aborts,
+SErrors and bad-mode exceptions. A plain `panic()` path is not captured yet.
 
 ## Build
 

@@ -53,7 +53,7 @@ if [ ! -d "$UBOOT_SRC/.git" ]; then
 fi
 
 git -C "$UBOOT_SRC" fetch --depth=1 origin "$UBOOT_REF"
-git -C "$UBOOT_SRC" checkout -q --detach FETCH_HEAD
+git -C "$UBOOT_SRC" checkout -q -f --detach FETCH_HEAD
 git -C "$UBOOT_SRC" reset -q --hard FETCH_HEAD
 git -C "$UBOOT_SRC" clean -qfd
 

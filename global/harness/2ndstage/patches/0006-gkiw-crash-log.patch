@@ -1,0 +1,220 @@
+diff --git a/arch/arm/lib/interrupts_64.c b/arch/arm/lib/interrupts_64.c
+index b3024ba5..4c012751 100644
+--- a/arch/arm/lib/interrupts_64.c
++++ b/arch/arm/lib/interrupts_64.c
+@@ -7,6 +7,7 @@
+ #include <asm/esr.h>
+ #include <asm/global_data.h>
+ #include <asm/ptrace.h>
++#include <gkiw.h>
+ #include <irq_func.h>
+ #include <linux/compiler.h>
+ #include <efi_loader.h>
+@@ -14,6 +15,10 @@
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
++void __weak gkiw_log_crash(struct pt_regs *regs)
++{
++}
++
+ int interrupt_init(void)
+ {
+ 	enable_interrupts();
+@@ -85,6 +90,8 @@ void show_regs(struct pt_regs *regs)
+ {
+ 	int i;
+ 
++	gkiw_log_crash(regs);
++
+ 	if (gd->flags & GD_FLG_RELOC)
+ 		printf("elr: %016lx lr : %016lx (reloc)\n",
+ 		       regs->elr - gd->reloc_off,
+diff --git a/cmd/Kconfig b/cmd/Kconfig
+index f3171116..a11e302a 100644
+--- a/cmd/Kconfig
++++ b/cmd/Kconfig
+@@ -1225,6 +1225,20 @@ config CMD_GKIW
+ 	  pstore/ramoops from the previous boot) and to arm the hardware
+ 	  watchdog. Used by the gki_world development bootloader.
+ 
++config GKIW_LOG_ADDR
++	hex "gkiw 2ndstage crash log address"
++	default 0x1c100000
++	depends on CMD_GKIW
++	help
++	  Physical address of the persistent second-stage crash log. Keep it
++	  clear of the Linux ramoops region, the fastboot buffer and U-Boot's
++	  stack/heap.
++
++config GKIW_LOG_SIZE
++	hex "gkiw 2ndstage crash log size"
++	default 0x10000
++	depends on CMD_GKIW
++
+ config CMD_FASTBOOT_ABORT_KEYED
+ 	bool "fastboot abort with any key"
+ 	depends on CMD_FASTBOOT && USB_FUNCTION_FASTBOOT
+diff --git a/cmd/gkiw.c b/cmd/gkiw.c
+index 7f150d72..c6a189d1 100644
+--- a/cmd/gkiw.c
++++ b/cmd/gkiw.c
+@@ -7,15 +7,127 @@
+  */
+ 
+ #include <command.h>
++#include <cpu_func.h>
+ #include <dm.h>
++#include <gkiw.h>
+ #include <linux/string.h>
+ #include <linux/types.h>
+ #include <vsprintf.h>
+ #include <wdt.h>
++#include <asm/ptrace.h>
+ 
+ #define GKIW_WDT_DEFAULT_MS	60000
+ #define GKIW_PSTORE_LINE	16
+ 
++#define GKIW_LOG_MAGIC		0x474c4b47 /* "GKLG" */
++
++struct gkiw_log_hdr {
++	u32 magic;
++	u32 len;
++	u32 seq;
++	u32 reserved;
++};
++
++static struct gkiw_log_hdr *gkiw_log_header(void)
++{
++	return (struct gkiw_log_hdr *)(unsigned long)CONFIG_GKIW_LOG_ADDR;
++}
++
++static char *gkiw_log_data(void)
++{
++	return (char *)gkiw_log_header() + sizeof(struct gkiw_log_hdr);
++}
++
++static u32 gkiw_log_capacity(void)
++{
++	return CONFIG_GKIW_LOG_SIZE - sizeof(struct gkiw_log_hdr);
++}
++
++static void gkiw_log_sync(void)
++{
++	flush_dcache_range(CONFIG_GKIW_LOG_ADDR,
++			   CONFIG_GKIW_LOG_ADDR + CONFIG_GKIW_LOG_SIZE);
++}
++
++/*
++ * Called from the ARM64 exception path before the register dump is printed.
++ * The region is plain RAM outside U-Boot's BSS/stack/heap and survives reset.
++ */
++void gkiw_log_crash(struct pt_regs *regs)
++{
++	struct gkiw_log_hdr *hdr = gkiw_log_header();
++	static char buf[1024];
++	u32 seq = 0;
++	int used = 0;
++	int ret;
++	int i;
++
++	if (!regs)
++		return;
++
++	if (hdr->magic == GKIW_LOG_MAGIC)
++		seq = hdr->seq;
++	seq++;
++
++	ret = snprintf(buf + used, sizeof(buf) - used,
++		       "gkiw 2ndstage crash #%u\nesr=0x%016lx elr=0x%016lx spsr=0x%016lx\n",
++		       seq, regs->esr, regs->elr, regs->spsr);
++	if (ret > 0)
++		used += ret;
++	if (used >= (int)sizeof(buf))
++		used = sizeof(buf);
++
++	for (i = 0; i < 31 && used < (int)sizeof(buf); i++) {
++		ret = snprintf(buf + used, sizeof(buf) - used,
++			       "x%-2d=0x%016lx%s", i, regs->regs[i],
++			       (i & 1) ? "\n" : " ");
++		if (ret > 0)
++			used += ret;
++	}
++	if (used >= (int)sizeof(buf))
++		used = sizeof(buf);
++
++	if (used > (int)gkiw_log_capacity())
++		used = gkiw_log_capacity();
++
++	memcpy(gkiw_log_data(), buf, used);
++	hdr->len = used;
++	hdr->seq = seq;
++	hdr->magic = GKIW_LOG_MAGIC;
++	gkiw_log_sync();
++}
++
++static int gkiw_do_log(int argc, char *const argv[])
++{
++	struct gkiw_log_hdr *hdr = gkiw_log_header();
++
++	if (argc == 2 && !strcmp(argv[1], "clear")) {
++		hdr->magic = 0;
++		gkiw_log_sync();
++		printf("gkiw: 2ndstage crash log cleared\n");
++		return 0;
++	}
++	if (argc != 1)
++		return CMD_RET_USAGE;
++
++	invalidate_dcache_range(CONFIG_GKIW_LOG_ADDR,
++				CONFIG_GKIW_LOG_ADDR + CONFIG_GKIW_LOG_SIZE);
++	if (hdr->magic != GKIW_LOG_MAGIC) {
++		printf("gkiw: no 2ndstage crash log\n");
++		return 0;
++	}
++	if (hdr->len > gkiw_log_capacity()) {
++		printf("gkiw: corrupt 2ndstage crash log (len=%u)\n", hdr->len);
++		return CMD_RET_FAILURE;
++	}
++
++	printf("%s", gkiw_log_data());
++	if (!hdr->len || gkiw_log_data()[hdr->len - 1] != '\n')
++		printf("\n");
++
++	return 0;
++}
++
+ static int gkiw_wdt_get(struct udevice **dev)
+ {
+ 	return uclass_get_device(UCLASS_WDT, 0, dev);
+@@ -124,6 +236,8 @@ static int do_gkiw(struct cmd_tbl *cmdtp, int flag, int argc,
+ 		return gkiw_do_pstore(argc - 1, argv + 1);
+ 	if (!strcmp(argv[1], "watchdog"))
+ 		return gkiw_do_watchdog(argc - 1, argv + 1);
++	if (!strcmp(argv[1], "log"))
++		return gkiw_do_log(argc - 1, argv + 1);
+ 
+ 	return CMD_RET_USAGE;
+ }
+@@ -131,4 +245,5 @@ static int do_gkiw(struct cmd_tbl *cmdtp, int flag, int argc,
+ U_BOOT_CMD(gkiw, 6, 1, do_gkiw,
+ 	   "gki_world second-stage helpers",
+ 	   "pstore <addr> <size> [offset] [len] - hex dump a RAM/pstore region\n"
+-	   "gkiw watchdog [ms|off] - arm (default 60000 ms) or stop the watchdog");
++	   "gkiw watchdog [ms|off] - arm (default 60000 ms) or stop the watchdog\n"
++	   "gkiw log [clear] - show or clear the previous 2ndstage crash log");
+diff --git a/include/gkiw.h b/include/gkiw.h
+new file mode 100644
+index 00000000..8cc0d2ae
+--- /dev/null
++++ b/include/gkiw.h
+@@ -0,0 +1,9 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++#ifndef __GKIW_H
++#define __GKIW_H
++
++struct pt_regs;
++
++void gkiw_log_crash(struct pt_regs *regs);
++
++#endif /* __GKIW_H */
