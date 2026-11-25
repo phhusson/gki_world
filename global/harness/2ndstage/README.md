@@ -147,21 +147,31 @@ The source tree (`.bootloader/u-boot`) is managed: every run resets it to
 ### Boot image
 
 `gkiw-2ndstage-boot.img` is an Android v0 boot image: kernel load address
-`0x01000000`, page size 2048, empty ramdisk. The kernel is:
+`0x08000000`, page size 2048, empty ramdisk. The kernel is:
 
 ```text
-0x01000000 + 0x0000   4 KiB ARM64 Image header, code0 branches to 0x1000
-0x01000000 + 0x1000   u-boot-dtb.bin, linked at 0x01001000
+0x08000000 + 0x0000   4 KiB ARM64 Image header, code0 branches to 0x1000
+0x08000000 + 0x1000   u-boot-dtb.bin, linked at 0x08001000
 ```
 
 The header sets flags bit 3 so `booti` respects the load address instead of
-relocating the image. This is a **chainload** image: the stock first stage must
-boot an Android image and allow unsigned payloads. It does not replace a signed
-Amlogic BL2/FIP. If the first stage loads a raw payload instead, use
-`u-boot.bin` and make it load at `0x01001000` (or change `CONFIG_TEXT_BASE`).
+relocating the image, and U-Boot is built position-independent so a 4 KiB-aligned
+relocation still works. `0x08000000` is deliberately above the low 128 MiB and
+away from the vendor DTB at `0x01000000`: loading there overwrites the DTB and
+the first stage later fails with `FDT_ERR_BADMAGIC`.
+
+This is a **chainload** image: the stock first stage must boot an Android image
+and allow unsigned payloads. It does not replace a signed Amlogic BL2/FIP. If
+the first stage loads a raw payload instead, use `u-boot.bin` and make it load
+at `0x08001000` (or change `CONFIG_TEXT_BASE`).
 
 The fastboot buffer, pstore and memory assumptions are unchanged; only the
-entry address of the payload moves by 4 KiB.
+entry address of the payload moves.
+
+If the log says `kernel loaded at 0x01000000` followed by
+`libfdt fdt_check_header(): FDT_ERR_BADMAGIC` or `image is not a fdt`, the
+kernel load address has collided with the first stage's DTB. Move
+`GKIW_BOOTIMG_BASE`, keep `CONFIG_TEXT_BASE` at base + header size, and rebuild.
 
 Board data:
 
