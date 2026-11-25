@@ -1,0 +1,170 @@
+diff --git a/cmd/Kconfig b/cmd/Kconfig
+index c64ca180..f3171116 100644
+--- a/cmd/Kconfig
++++ b/cmd/Kconfig
+@@ -1218,6 +1218,13 @@ config CMD_FASTBOOT
+ 
+ 	  See doc/android/fastboot.rst for more information.
+ 
++config CMD_GKIW
++	bool "gkiw - gki_world second-stage helpers"
++	help
++	  Provides the "gkiw" command to hex-dump a RAM region (for example
++	  pstore/ramoops from the previous boot) and to arm the hardware
++	  watchdog. Used by the gki_world development bootloader.
++
+ config CMD_FASTBOOT_ABORT_KEYED
+ 	bool "fastboot abort with any key"
+ 	depends on CMD_FASTBOOT && USB_FUNCTION_FASTBOOT
+diff --git a/cmd/Makefile b/cmd/Makefile
+index 7c3db81e..b2a2732d 100644
+--- a/cmd/Makefile
++++ b/cmd/Makefile
+@@ -93,6 +93,7 @@ obj-$(CONFIG_CMD_FS_GENERIC) += fs.o
+ obj-$(CONFIG_CMD_FUSE) += fuse.o
+ obj-$(CONFIG_CMD_FWU_METADATA) += fwu_mdata.o
+ obj-$(CONFIG_CMD_GETTIME) += gettime.o
++obj-$(CONFIG_CMD_GKIW) += gkiw.o
+ obj-$(CONFIG_CMD_GPIO) += gpio.o
+ obj-$(CONFIG_CMD_HISTORY) += history.o
+ obj-$(CONFIG_CMD_HVC) += smccc.o
+diff --git a/cmd/gkiw.c b/cmd/gkiw.c
+new file mode 100644
+index 00000000..7f150d72
+--- /dev/null
++++ b/cmd/gkiw.c
+@@ -0,0 +1,134 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * gki_world second-stage helpers.
++ *
++ * Deliberately small: read a RAM region (pstore/ramoops) and arm the hardware
++ * watchdog before handing control to Linux.
++ */
++
++#include <command.h>
++#include <dm.h>
++#include <linux/string.h>
++#include <linux/types.h>
++#include <vsprintf.h>
++#include <wdt.h>
++
++#define GKIW_WDT_DEFAULT_MS	60000
++#define GKIW_PSTORE_LINE	16
++
++static int gkiw_wdt_get(struct udevice **dev)
++{
++	return uclass_get_device(UCLASS_WDT, 0, dev);
++}
++
++static int gkiw_wdt_arm(u64 timeout_ms)
++{
++	struct udevice *dev;
++	int ret;
++
++	ret = gkiw_wdt_get(&dev);
++	if (ret)
++		return ret;
++
++	return wdt_start(dev, timeout_ms, 0);
++}
++
++static int gkiw_wdt_disarm(void)
++{
++	struct udevice *dev;
++	int ret;
++
++	ret = gkiw_wdt_get(&dev);
++	if (ret)
++		return ret;
++
++	return wdt_stop(dev);
++}
++
++/*
++ * fastboot calls this immediately before booting the downloaded image. A
++ * missing watchdog is reported but not fatal: a broken watchdog must not stop
++ * the development loop.
++ */
++void fastboot_preboot(void)
++{
++	int ret = gkiw_wdt_arm(GKIW_WDT_DEFAULT_MS);
++
++	if (ret)
++		printf("gkiw: cannot arm watchdog (%d)\n", ret);
++	else
++		printf("gkiw: watchdog armed for %d ms\n", GKIW_WDT_DEFAULT_MS);
++}
++
++static int gkiw_do_pstore(int argc, char *const argv[])
++{
++	unsigned long addr, size, offset = 0, len;
++	const u8 *base;
++	unsigned long i, j;
++
++	if (argc < 3 || argc > 5)
++		return CMD_RET_USAGE;
++
++	addr = hextoul(argv[1], NULL);
++	size = hextoul(argv[2], NULL);
++	if (argc > 3)
++		offset = hextoul(argv[3], NULL);
++	if (offset > size)
++		return CMD_RET_USAGE;
++
++	len = size - offset;
++	if (argc > 4)
++		len = hextoul(argv[4], NULL);
++	if (len > size - offset)
++		return CMD_RET_USAGE;
++
++	base = (const u8 *)addr + offset;
++	for (i = 0; i < len; i += GKIW_PSTORE_LINE) {
++		printf("%08lx:", addr + offset + i);
++		for (j = 0; j < GKIW_PSTORE_LINE && i + j < len; j++)
++			printf(" %02x", base[i + j]);
++		printf("\n");
++	}
++
++	return 0;
++}
++
++static int gkiw_do_watchdog(int argc, char *const argv[])
++{
++	int ret;
++
++	if (argc == 1)
++		ret = gkiw_wdt_arm(GKIW_WDT_DEFAULT_MS);
++	else if (argc == 2 && !strcmp(argv[1], "off"))
++		ret = gkiw_wdt_disarm();
++	else if (argc == 2)
++		ret = gkiw_wdt_arm(hextoul(argv[1], NULL));
++	else
++		return CMD_RET_USAGE;
++
++	if (ret) {
++		printf("gkiw: watchdog operation failed: %d\n", ret);
++		return CMD_RET_FAILURE;
++	}
++
++	return 0;
++}
++
++static int do_gkiw(struct cmd_tbl *cmdtp, int flag, int argc,
++		   char *const argv[])
++{
++	if (argc < 2)
++		return CMD_RET_USAGE;
++
++	if (!strcmp(argv[1], "pstore"))
++		return gkiw_do_pstore(argc - 1, argv + 1);
++	if (!strcmp(argv[1], "watchdog"))
++		return gkiw_do_watchdog(argc - 1, argv + 1);
++
++	return CMD_RET_USAGE;
++}
++
++U_BOOT_CMD(gkiw, 6, 1, do_gkiw,
++	   "gki_world second-stage helpers",
++	   "pstore <addr> <size> [offset] [len] - hex dump a RAM/pstore region\n"
++	   "gkiw watchdog [ms|off] - arm (default 60000 ms) or stop the watchdog");

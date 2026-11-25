@@ -394,6 +394,16 @@ cannot boot every phone.
 recovery, and `g_serial` on `ttyGS0` (host sees `/dev/ttyACM0`). Network gadget
 is an optional extra when logs outgrow a tty.
 
+### Second-stage bootloader (development)
+
+For the fast edit/build/boot loop, use the development bootloader in
+[global/harness/2ndstage](../global/harness/2ndstage/README.md). It is a thin
+U-Boot fork with UART plus a single USB fastboot function: `fastboot boot`
+loads an Android image, `oem pstore:<addr>:<size>` returns the previous boot's
+ramoops, and a preboot hook arms a 60 s watchdog. It is a host-side development
+tool, not part of a device's shipped stack, and does not replace the evidence
+bundle or the `boots` gate.
+
 ## 11. CI
 
 Two builds, with different jobs:

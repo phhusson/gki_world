@@ -1,0 +1,199 @@
+diff --git a/drivers/fastboot/Kconfig b/drivers/fastboot/Kconfig
+index 9a5251d4..6e34812f 100644
+--- a/drivers/fastboot/Kconfig
++++ b/drivers/fastboot/Kconfig
+@@ -338,6 +338,13 @@ config FASTBOOT_CMD_OEM_CONSOLE
+ 	  Add support for the "oem console" command to input and read console
+ 	  record buffer.
+ 
++config FASTBOOT_CMD_OEM_PSTORE
++	bool "Enable the 'oem pstore' command"
++	help
++	  Stream a RAM region over the fastboot protocol in base16 chunks. This
++	  is intended for pulling pstore/ramoops data left by the previous
++	  boot: the host sends "oem pstore:<addr>:<size>".
++
+ config FASTBOOT_OEM_BOARD
+ 	bool "Enable the 'oem board' command"
+ 	help
+diff --git a/drivers/fastboot/fb_command.c b/drivers/fastboot/fb_command.c
+index 63b0f570..e8ebe425 100644
+--- a/drivers/fastboot/fb_command.c
++++ b/drivers/fastboot/fb_command.c
+@@ -56,6 +56,10 @@ static void oem_partconf(char *, char *);
+ static void oem_bootbus(char *, char *);
+ static void oem_console(char *, char *);
+ static void oem_board(char *, char *);
++#if CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE)
++static void oem_pstore(char *, char *);
++static void oem_pstore_next(char *response);
++#endif
+ static void run_ucmd(char *, char *);
+ static void run_acmd(char *, char *);
+ #if CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING)
+@@ -188,6 +192,10 @@ static const struct fastboot_command commands[FASTBOOT_COMMAND_COUNT] = {
+ 		.command = "oem board",
+ 		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_OEM_BOARD, (oem_board), (NULL))
+ 	},
++	[FASTBOOT_COMMAND_OEM_PSTORE] = {
++		.command = "oem pstore",
++		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE, (oem_pstore), (NULL))
++	},
+ 	[FASTBOOT_COMMAND_UCMD] = {
+ 		.command = "UCmd",
+ 		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_UUU_SUPPORT, (run_ucmd), (NULL))
+@@ -273,6 +281,12 @@ void fastboot_multiresponse(int cmd, char *response)
+ 			break;
+ 		}
+ 		fallthrough;
++	case FASTBOOT_COMMAND_OEM_PSTORE:
++		if (CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE)) {
++			oem_pstore_next(response);
++			break;
++		}
++		fallthrough;
+ 	default:
+ 		fastboot_fail("Unknown multiresponse command", response);
+ 		break;
+@@ -741,6 +755,90 @@ static void __maybe_unused oem_board(char *cmd_parameter, char *response)
+ 	fastboot_oem_board(cmd_parameter, (void *)fastboot_buf_addr, image_size, response);
+ }
+ 
++#if CONFIG_IS_ENABLED(FASTBOOT_CMD_OEM_PSTORE)
++#define GKIW_PSTORE_CHUNK	24
++
++static ulong gkiw_pstore_addr;
++static ulong gkiw_pstore_size;
++static ulong gkiw_pstore_offset;
++static bool gkiw_pstore_active;
++
++/**
++ * oem_pstore() - Start streaming a RAM region to the host
++ *
++ * @cmd_parameter: "<addr>:<size>" in hex
++ * @response: Pointer to fastboot response buffer
++ *
++ * The actual data is sent by oem_pstore_next(), which the fastboot
++ * multiresponse machinery calls until the region is exhausted.
++ */
++static void oem_pstore(char *cmd_parameter, char *response)
++{
++	char *end;
++	ulong addr, size;
++
++	if (!cmd_parameter) {
++		fastboot_fail("missing pstore region", response);
++		return;
++	}
++
++	addr = hextoul(cmd_parameter, &end);
++	if (end == cmd_parameter || *end != ':') {
++		fastboot_fail("expected oem pstore:<addr>:<size>", response);
++		return;
++	}
++
++	size = hextoul(end + 1, NULL);
++	if (!size) {
++		fastboot_fail("empty pstore region", response);
++		return;
++	}
++
++	gkiw_pstore_addr = addr;
++	gkiw_pstore_size = size;
++	gkiw_pstore_offset = 0;
++	gkiw_pstore_active = true;
++
++	fastboot_response(FASTBOOT_MULTIRESPONSE_START, response, NULL);
++}
++
++/**
++ * oem_pstore_next() - Send the next chunk of the pstore region
++ *
++ * @response: Pointer to fastboot response buffer
++ */
++static void oem_pstore_next(char *response)
++{
++	const u8 *base;
++	char hex[2 * GKIW_PSTORE_CHUNK + 1];
++	ulong n, i;
++
++	if (!gkiw_pstore_active) {
++		fastboot_fail("no pstore request", response);
++		return;
++	}
++
++	n = gkiw_pstore_size - gkiw_pstore_offset;
++	if (n > GKIW_PSTORE_CHUNK)
++		n = GKIW_PSTORE_CHUNK;
++
++	if (!n) {
++		gkiw_pstore_active = false;
++		fastboot_okay(NULL, response);
++		return;
++	}
++
++	base = (const u8 *)gkiw_pstore_addr + gkiw_pstore_offset;
++	for (i = 0; i < n; i++)
++		sprintf(hex + 2 * i, "%02x", base[i]);
++	hex[2 * n] = '\0';
++
++	fastboot_response("INFO", response, "%08lx:%s",
++			  gkiw_pstore_offset, hex);
++	gkiw_pstore_offset += n;
++}
++#endif
++
+ #if CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING)
+ /**
+  * flashing_flash_dev() - block device of the fastboot flash back end
+diff --git a/drivers/fastboot/fb_common.c b/drivers/fastboot/fb_common.c
+index 9184bc63..0714b0c2 100644
+--- a/drivers/fastboot/fb_common.c
++++ b/drivers/fastboot/fb_common.c
+@@ -148,6 +148,10 @@ void (*fastboot_get_progress_callback(void))(const char *)
+ }
+ 
+ #ifndef CONFIG_XPL_BUILD
++void __weak fastboot_preboot(void)
++{
++}
++
+ /**
+  * fastboot_boot() - Execute fastboot boot command
+  *
+@@ -162,6 +166,8 @@ void fastboot_boot(void)
+ {
+ 	char *s;
+ 
++	fastboot_preboot();
++
+ 	s = env_get("fastboot_bootcmd");
+ 	if (s) {
+ 		run_command(s, CMD_FLAG_ENV);
+diff --git a/include/fastboot.h b/include/fastboot.h
+index f3aa6fcc..fdcf6525 100644
+--- a/include/fastboot.h
++++ b/include/fastboot.h
+@@ -51,6 +51,7 @@ enum {
+ 	FASTBOOT_COMMAND_OEM_RUN,
+ 	FASTBOOT_COMMAND_OEM_CONSOLE,
+ 	FASTBOOT_COMMAND_OEM_BOARD,
++	FASTBOOT_COMMAND_OEM_PSTORE,
+ 	FASTBOOT_COMMAND_ACMD,
+ 	FASTBOOT_COMMAND_UCMD,
+ 	FASTBOOT_COMMAND_FLASHING_LOCK,
+@@ -161,6 +162,14 @@ int fastboot_usb_run(int controller_index, void *buf_addr, u32 buf_size);
+  */
+ void fastboot_boot(void);
+ 
++/**
++ * fastboot_preboot() - Hook called immediately before booting a downloaded image
++ *
++ * Boards may implement this to arm a watchdog or perform other last-minute
++ * setup. The default implementation does nothing.
++ */
++void fastboot_preboot(void);
++
+ /**
+  * fastboot_handle_boot() - Shared implementation of system reaction to
+  * fastboot commands

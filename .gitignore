@@ -1,4 +1,7 @@
 /.kernel/
+/.bootloader/
+__pycache__/
+*.pyc
 *.o
 *.ko
 *.mod

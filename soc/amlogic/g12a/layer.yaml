@@ -1,0 +1,8 @@
+schema: 1
+kind: soc
+id: soc/amlogic/g12a
+description: Amlogic G12A family (S905X2 and relatives)
+requires:
+  - vendor/amlogic
+maintainers:
+  - "@phhusson"
