@@ -1,0 +1,37 @@
+diff --git a/board/amlogic/u200/u200.c b/board/amlogic/u200/u200.c
+index 96244c9c..473fe6e3 100644
+--- a/board/amlogic/u200/u200.c
++++ b/board/amlogic/u200/u200.c
+@@ -5,8 +5,10 @@
+  */
+ 
+ #include <dm.h>
++#include <env.h>
+ #include <init.h>
+ #include <net.h>
++#include <vsprintf.h>
+ #include <asm/io.h>
+ #include <asm/arch/axg.h>
+ #include <asm/arch/sm.h>
+@@ -19,3 +21,21 @@ int misc_init_r(void)
+ 
+ 	return 0;
+ }
++
++int meson_board_late_init(void)
++{
++	char serial[SM_SERIAL_SIZE];
++	char serial_hex[2 * SM_SERIAL_SIZE + 1];
++	int i;
++
++	if (!meson_sm_get_serial(serial, sizeof(serial))) {
++		for (i = 0; i < SM_SERIAL_SIZE; i++)
++			sprintf(serial_hex + 2 * i, "%02x", serial[i]);
++		serial_hex[2 * SM_SERIAL_SIZE] = '\0';
++		env_set("serial#", serial_hex);
++	}
++
++	env_set("board", "gkiw-g12a");
++
++	return 0;
++}

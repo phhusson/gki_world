@@ -19,9 +19,17 @@ set -eu
 
 PAYLOAD=$1
 OUTPUT=$2
+DTB=${3:-}
+HEADER_VERSION=${4:-0}
+DTB_OFFSET=${GKIW_BOOTIMG_DTB_OFFSET:-0x00100000}
 
 [ -f "$PAYLOAD" ] || {
 	echo "mkbootimg: missing payload: $PAYLOAD" >&2
+	exit 1
+}
+
+[ -z "$DTB" ] || [ -f "$DTB" ] || {
+	echo "mkbootimg: missing dtb: $DTB" >&2
 	exit 1
 }
 
@@ -79,13 +87,20 @@ with open(kernel_path, "wb") as out:
 PY
 
 : > "$EMPTY"
-mkbootimg \
+
+set -- \
 	--kernel "$KERNEL" \
 	--ramdisk "$EMPTY" \
 	--base "$GKIW_BOOTIMG_BASE" \
 	--kernel_offset 0x0 \
-	--pagesize "$GKIW_BOOTIMG_PAGESIZE" \
-	--header_version 0 \
+	--pagesize "$GKIW_BOOTIMG_PAGESIZE"
+
+if [ -n "$DTB" ]; then
+	set -- "$@" --dtb "$DTB" --dtb_offset "$DTB_OFFSET"
+fi
+
+mkbootimg "$@" \
+	--header_version "$HEADER_VERSION" \
 	--output "$OUTPUT"
 
 echo "built: $OUTPUT"

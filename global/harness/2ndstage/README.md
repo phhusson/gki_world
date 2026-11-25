@@ -137,9 +137,24 @@ wedges comes back on its own. For a boot that must not be interrupted, use
 
 ```sh
 global/harness/2ndstage/scripts/build.sh
-# -> .bootloader/build-g12a/gkiw-2ndstage-boot.img
+# -> .bootloader/build-g12a/gkiw-2ndstage-boot.img      (v0, vendor chainload)
+#    .bootloader/build-g12a/gkiw-2ndstage-selfboot.img  (v2 + DTB, fastboot boot)
 #    .bootloader/build-g12a/u-boot.bin
 ```
+
+The v0 image is for the stock first stage. The v2 image exists so the running
+second stage can chainload itself with a valid FDT:
+
+```sh
+fastboot boot gkiw-2ndstage-selfboot.img
+```
+
+Without the DTB, U-Boot logs `header_version must be >= 2 to get dtb` and
+`Working FDT set to 0`.
+
+`serial#` is derived from the Amlogic secure-monitor chip serial and exposed as
+fastboot `serialno`; `board` is set to `gkiw-g12a`, which becomes the fastboot
+`product`.
 
 Requirements: `aarch64-linux-gnu-gcc`, `mkbootimg` (AOSP host tools), and the
 usual U-Boot host tools (`bison`, `flex`, `swig`, Python). The script disables
@@ -201,6 +216,12 @@ but not a new build of the gkiw patches.
 # once: make the stock first stage chainload the second stage
 fastboot flash boot gkiw-2ndstage-boot.img
 # (or `fastboot boot` it, if the stock bootloader supports that)
+```
+
+Self-boot check from the running second stage:
+
+```sh
+fastboot boot gkiw-2ndstage-selfboot.img
 ```
 
 After it enumerates:

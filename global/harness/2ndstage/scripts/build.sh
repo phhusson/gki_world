@@ -72,7 +72,19 @@ make -C "$UBOOT_SRC" O="$BUILD" -j"$JOBS" CROSS_COMPILE="$CROSS_COMPILE"
 GKIW_BOOTIMG_BASE="$GKIW_BOOTIMG_BASE" \
 GKIW_BOOTIMG_HEADER_SIZE="$GKIW_BOOTIMG_HEADER_SIZE" \
 GKIW_BOOTIMG_PAGESIZE="$GKIW_BOOTIMG_PAGESIZE" \
+GKIW_BOOTIMG_DTB_OFFSET="$GKIW_BOOTIMG_DTB_OFFSET" \
 "$ROOT/global/harness/2ndstage/scripts/mkbootimg.sh" \
 	"$BUILD/u-boot-dtb.bin" "$BUILD/gkiw-2ndstage-boot.img"
+
+# Self-boot variant for `fastboot boot`: Android v2 image with a DTB, so the
+# running second stage can chainload itself without the "header_version >= 2"
+# warning and with a valid FDT.
+GKIW_BOOTIMG_BASE="$GKIW_BOOTIMG_BASE" \
+GKIW_BOOTIMG_HEADER_SIZE="$GKIW_BOOTIMG_HEADER_SIZE" \
+GKIW_BOOTIMG_PAGESIZE="$GKIW_BOOTIMG_PAGESIZE" \
+GKIW_BOOTIMG_DTB_OFFSET="$GKIW_BOOTIMG_DTB_OFFSET" \
+"$ROOT/global/harness/2ndstage/scripts/mkbootimg.sh" \
+	"$BUILD/u-boot-dtb.bin" "$BUILD/gkiw-2ndstage-selfboot.img" \
+	"$BUILD/u-boot.dtb" 2
 
 echo "built: $BUILD/u-boot.bin"
