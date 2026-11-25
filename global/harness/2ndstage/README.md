@@ -43,6 +43,11 @@ Only UART and the fastboot gadget. U-Boot's USB gadget stack is single-function,
 so there is no composite ACM+fastboot device. The UART is the console; USB is
 the control and data channel.
 
+The console pinmux is **inherited from the first stage**. Some S905X2 boxes
+route UART over the SD card pads with a special mux; re-applying the reference
+board's UART pins changes the RX pad and leaves TX-only output. For those
+boards the bootloader and Linux trees must not add a UART pinctrl node.
+
 | Need | Mechanism |
 |------|-----------|
 | boot a kernel | `fastboot boot boot.img` |
