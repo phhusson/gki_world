@@ -1,0 +1,790 @@
+diff --git a/arch/arm/mach-mediatek/Kconfig b/arch/arm/mach-mediatek/Kconfig
+index cd841098..edb73b69 100644
+--- a/arch/arm/mach-mediatek/Kconfig
++++ b/arch/arm/mach-mediatek/Kconfig
+@@ -155,6 +155,13 @@ config TARGET_MT8518
+ 	  Ethernet, IR TX/RX, I2C, I2S, S/PDIF, and built-in Wi-Fi / Bluetooth combo
+ 	  chip and several DDR3 and DDR4 options.
+ 
++config TARGET_MT6739
++	bool "MediaTek MT6739 SoC"
++	select ARM64
++	help
++	  The MediaTek MT6739 is a ARM64-based SoC with a quad-core Cortex-A53.
++	  It includes UART, USB2.0 OTG, SD and MMC cards, NAND, PWM and I2C.
++
+ endchoice
+ 
+ if ARM64
+@@ -198,6 +205,7 @@ config SYS_BOARD
+ 	default "mt8512" if TARGET_MT8512
+ 	default "mt8516" if TARGET_MT8516
+ 	default "mt8518" if TARGET_MT8518
++	default "mt6739" if TARGET_MT6739
+ 	default ""
+ 	help
+ 	  This option contains information about board name.
+@@ -213,6 +221,7 @@ config SYS_CONFIG_NAME
+ 	default "mt8512" if TARGET_MT8512
+ 	default "mt8516" if TARGET_MT8516
+ 	default "mt8518" if TARGET_MT8518
++	default "mt6739" if TARGET_MT6739
+ 
+ config MTK_BROM_HEADER_INFO
+ 	string
+diff --git a/arch/arm/mach-mediatek/Makefile b/arch/arm/mach-mediatek/Makefile
+index 661fc0b8..201c4dae 100644
+--- a/arch/arm/mach-mediatek/Makefile
++++ b/arch/arm/mach-mediatek/Makefile
+@@ -22,3 +22,4 @@ obj-$(CONFIG_TARGET_MT8366) += mt8366/
+ obj-$(CONFIG_TARGET_MT8512) += mt8512/
+ obj-$(CONFIG_TARGET_MT8516) += mt8516/
+ obj-$(CONFIG_TARGET_MT8518) += mt8518/
++obj-$(CONFIG_TARGET_MT6739) += mt6739/
+diff --git a/arch/arm/mach-mediatek/mt6739/Makefile b/arch/arm/mach-mediatek/mt6739/Makefile
+new file mode 100644
+index 00000000..26ca6f45
+--- /dev/null
++++ b/arch/arm/mach-mediatek/mt6739/Makefile
+@@ -0,0 +1,4 @@
++# SPDX-License-Identifier: GPL-2.0
++
++obj-y += init.o
++obj-y += lowlevel_init.o
+diff --git a/arch/arm/mach-mediatek/mt6739/init.c b/arch/arm/mach-mediatek/mt6739/init.c
+new file mode 100644
+index 00000000..0eecd8eb
+--- /dev/null
++++ b/arch/arm/mach-mediatek/mt6739/init.c
+@@ -0,0 +1,52 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * MediaTek MT6739 SoC support.
++ *
++ * The gki_world second stage is chainloaded by the stock first stage, which
++ * has already initialised DDR, the PSCI monitor and the UART pinmux.  This
++ * file therefore only fills in the board information U-Boot needs and keeps
++ * the reset path independent of PSCI.
++ */
++
++#include <dm.h>
++#include <fdtdec.h>
++#include <hang.h>
++#include <asm/io.h>
++#include <asm/global_data.h>
++#include <linux/delay.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++#define MTK_WDT_BASE		0x10007000
++#define MTK_WDT_RESTART		0x08
++#define MTK_WDT_SWRST		0x14
++#define WDT_RESTART_KEY		0x1971
++#define WDT_SWRST_KEY		0x1209
++
++int dram_init(void)
++{
++	return fdtdec_setup_mem_size_base();
++}
++
++void reset_cpu(void)
++{
++	void __iomem *wdt = (void __iomem *)MTK_WDT_BASE;
++
++	/*
++	 * A PSCI monitor is not guaranteed to be present when U-Boot is used as
++	 * a chainloaded development payload, but the top reset controller is
++	 * always there.  Kick the watchdog and request an immediate software
++	 * reset, matching what the vendor bootloader does.
++	 */
++	writel(WDT_RESTART_KEY, wdt + MTK_WDT_RESTART);
++	writel(WDT_SWRST_KEY, wdt + MTK_WDT_SWRST);
++
++	mdelay(1000);
++	hang();
++}
++
++int print_cpuinfo(void)
++{
++	printf("CPU:   MediaTek MT6739\n");
++	return 0;
++}
+diff --git a/arch/arm/mach-mediatek/mt6739/lowlevel_init.S b/arch/arm/mach-mediatek/mt6739/lowlevel_init.S
+new file mode 100644
+index 00000000..27dfb011
+--- /dev/null
++++ b/arch/arm/mach-mediatek/mt6739/lowlevel_init.S
+@@ -0,0 +1,42 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * K-Touch i9 / MT6739 early entry hook.
++ *
++ * This runs at the very first instruction of U-Boot, before the stack, MMU or
++ * console exist.  Paint the LK framebuffer white so a board with no UART and
++ * no USB still gives a visible "U-Boot started" signal.  The address is the
++ * device's /chosen/atag,videolfb-fb_base (0x5e605000).
++ */
++
++#include <linux/linkage.h>
++#include <asm/system.h>
++
++ENTRY(save_boot_params)
++	mov	x9, x0
++	mov	x10, x1
++	mov	x11, x2
++	mov	x12, x3
++
++	ldr	x13, =0x5e605000
++	mov	w14, #0xffff
++	movk	w14, #0xffff, lsl #16
++	mov	w15, #0x40000		/* 256K words = 1 MiB */
++1:
++	str	w14, [x13], #4
++	subs	w15, w15, #1
++	b.ne	1b
++
++	/* LK may place the visible framebuffer at the top of RAM instead. */
++	ldr	x13, =0x77ad0000
++	mov	w15, #0x40000
++2:
++	str	w14, [x13], #4
++	subs	w15, w15, #1
++	b.ne	2b
++
++	mov	x0, x9
++	mov	x1, x10
++	mov	x2, x11
++	mov	x3, x12
++	b	save_boot_params_ret
++ENDPROC(save_boot_params)
+diff --git a/board/mediatek/mt6739/Makefile b/board/mediatek/mt6739/Makefile
+new file mode 100644
+index 00000000..db129c5a
+--- /dev/null
++++ b/board/mediatek/mt6739/Makefile
+@@ -0,0 +1,3 @@
++# SPDX-License-Identifier: GPL-2.0
++
++obj-y += board.o
+diff --git a/board/mediatek/mt6739/board.c b/board/mediatek/mt6739/board.c
+new file mode 100644
+index 00000000..cbfc4387
+--- /dev/null
++++ b/board/mediatek/mt6739/board.c
+@@ -0,0 +1,297 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * K-Touch i9 (MT6739) development board.
++ *
++ * The board file is deliberately tiny: the stock first stage owns DDR, PSCI,
++ * the UART pinmux and the USB PHY power rails.  U-Boot only needs to publish
++ * the board name, re-enable the UART/USB gates the first stage may have
++ * closed, and bring up the fastboot gadget.
++ */
++
++#include <config.h>
++#include <console.h>
++#include <dm.h>
++#include <env.h>
++#include <fastboot.h>
++#include <linux/libfdt.h>
++#include <init.h>
++#include <log.h>
++#include <usb.h>
++#include <wdt.h>
++#include <asm/global_data.h>
++#include <asm/io.h>
++#include <cpu_func.h>
++#include <linux/bitops.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++#if CONFIG_IS_ENABLED(GKIW_BRINGUP_BEACONS)
++#define MTK_WDT_BASE		0x10007000
++#define MTK_WDT_MODE		0x00
++#define MTK_WDT_LENGTH		0x04
++#define MTK_WDT_RESTART		0x08
++#define WDT_MODE_KEY		(0x22u << 24)
++#define WDT_MODE_EN		BIT(0)
++#define WDT_MODE_EXTEN		BIT(2)
++#define WDT_LENGTH_KEY		0x8
++#define WDT_RESTART_KEY		0x1971
++
++/*
++ * Start the TOPRGU watchdog before the debug UART is touched.  If the UART
++ * clock/domain is the thing that hangs, this still gives a reset; if U-Boot
++ * never starts, the first-stage timer is what resets instead.
++ */
++static void mt6739_wdt_start_early(unsigned int ms)
++{
++	void __iomem *wdt = (void __iomem *)MTK_WDT_BASE;
++	unsigned int count = (ms * 1000 + 15624) / 15625;
++
++	if (count > 1023)
++		count = 1023;
++	writel((count << 5) | WDT_LENGTH_KEY, wdt + MTK_WDT_LENGTH);
++	writel(WDT_RESTART_KEY, wdt + MTK_WDT_RESTART);
++	setbits_le32(wdt + MTK_WDT_MODE,
++		     WDT_MODE_KEY | WDT_MODE_EN | WDT_MODE_EXTEN);
++}
++
++/*
++ * Encode boot progress in the watchdog timeout.  With CONFIG_WATCHDOG off the
++ * timer is started but never serviced, so the reset interval tells a
++ * console-less board how far U-Boot got.
++ */
++static void gkiw_beacon(unsigned int ms)
++{
++	struct udevice *dev;
++
++	if (uclass_get_device(UCLASS_WDT, 0, &dev))
++		return;
++	wdt_start(dev, ms, 0);
++}
++#else
++static inline void gkiw_beacon(unsigned int ms) { }
++#endif
++
++/*
++ * INFRA_AO / TOPCKGEN clock controls.  U-Boot has no MT6739 clock driver, and
++ * the first stage may gate UART0 before jumping, so the debug console has to
++ * re-enable it before the first character is written.
++ */
++#define MTK_INFRA_AO_BASE		0x10001000
++#define MTK_INFRA0_CG_CLR		0x84
++#define MTK_INFRA_UART0_BIT		22
++
++#define MTK_TOPCKGEN_BASE		0x10000000
++#define MTK_CLK_CFG_UPDATE		0x04
++#define MTK_CLK_CFG_2_CLR		0x68
++#define MTK_UART_SEL_BIT		8
++#define MTK_UART_UPDATE_BIT		9
++
++#if CONFIG_IS_ENABLED(DEBUG_UART_BOARD_INIT)
++void board_debug_uart_init(void)
++{
++	void __iomem *infra = (void __iomem *)MTK_INFRA_AO_BASE;
++	void __iomem *top = (void __iomem *)MTK_TOPCKGEN_BASE;
++
++#if CONFIG_IS_ENABLED(GKIW_BRINGUP_BEACONS)
++	/* Beacon 3s: U-Boot reached the debug UART hook. */
++	mt6739_wdt_start_early(3000);
++#endif
++
++	/* uart_sel = clk26m (parent index 0); update it in TOPCKGEN. */
++	writel(BIT(MTK_UART_SEL_BIT), top + MTK_CLK_CFG_2_CLR);
++	setbits_le32(top + MTK_CLK_CFG_UPDATE, BIT(MTK_UART_UPDATE_BIT));
++
++	/* infra_uart0 gate is active-low: clear it to enable the clock. */
++	writel(BIT(MTK_INFRA_UART0_BIT), infra + MTK_INFRA0_CG_CLR);
++}
++#endif
++
++/*
++ * Visual USB bringup states for a board with no console.  The framebuffer is
++ * painted a solid colour; the last colour on screen says how far USB got.
++ * 1 blue (fastboot start), 2 cyan (init), 3 green (g_dnl registered),
++ * 4 red (register failed), 5 yellow (loop), 6 magenta (USB reset),
++ * 7 orange (USB connect).
++ */
++/*
++ * Best-effort display backlight off.  DISP_PWM0 is at 0x1100e000; the
++ * vendor BLS path disables PWM_EN and sets duty 0.  If this panel uses the
++ * LCM/DSI backlight path instead, this is a no-op.
++ */
++static void gkiw_backlight_off(void)
++{
++	void __iomem *pwm = (void __iomem *)0x1100e000;
++
++	writel(0, pwm + 0x00);	/* EN = 0 */
++	writel(0, pwm + 0x0c);	/* commit */
++	writel(0, pwm + 0x1c);	/* duty = 0 */
++	writel(1, pwm + 0x0c);	/* commit 1 */
++	writel(0, pwm + 0x0c);
++}
++
++static void gkiw_fb_fill(u32 color)
++{
++	volatile u32 *p, *end;
++
++	p = (volatile u32 *)0x5e605000;
++	end = (volatile u32 *)(0x5e605000 + 0x100000);
++	for (; p < end; p++)
++		*p = color;
++	flush_dcache_range(0x5e605000, 0x5e605000 + 0x100000);
++
++	p = (volatile u32 *)0x77ad0000;
++	end = (volatile u32 *)(0x77ad0000 + 0x100000);
++	for (; p < end; p++)
++		*p = color;
++	flush_dcache_range(0x77ad0000, 0x77ad0000 + 0x100000);
++}
++
++void gkiw_usb_stage(int stage)
++{
++	switch (stage) {
++	case 1: gkiw_fb_fill(0x0000ff); break;	/* blue */
++	case 2: gkiw_fb_fill(0x00ffff); break;	/* cyan */
++	case 3: gkiw_fb_fill(0x00ff00); break;	/* green */
++	case 4: gkiw_fb_fill(0xff0000); break;	/* red */
++	case 5: gkiw_fb_fill(0xffff00); break;	/* yellow */
++	case 6: gkiw_fb_fill(0xff00ff); break;	/* magenta */
++	case 7: gkiw_fb_fill(0xff8000); break;	/* orange */
++	default: break;
++	}
++
++	/* Fastboot is up: stop burning the backlight while waiting. */
++	if (stage == 5)
++		gkiw_backlight_off();
++
++	/*
++	 * Also encode the stage in the watchdog timeout.  This survives even if
++	 * the display is showing LK's logo layer: stage N => 4s + N seconds.
++	 */
++	if (CONFIG_IS_ENABLED(GKIW_BRINGUP_BEACONS) && stage > 0)
++		gkiw_beacon(4000 + stage * 1000);
++}
++
++/*
++ * LK puts the MTK efuse devinfo in /chosen/atag,devinfo in the DTB it passes
++ * at tags_addr (0x44000000).  The property is { u32 data_size; u32 data[]; }
++ * in native endian; data[10] carries 0x56ab0000 | HRID size, and the HRID
++ * bytes start at data[12].  Use it as the fastboot serial.
++ */
++static const char *gkiw_devinfo_serial(void)
++{
++	void *fdt = (void *)0x44000000;
++	const u32 *p;
++	int off, len;
++	u32 size, hrid_size, i, j, pos = 0;
++	static char serial[2 * 8 * 4 + 1];
++
++	if (fdt_check_header(fdt))
++		return NULL;
++
++	off = fdt_path_offset(fdt, "/chosen");
++	if (off < 0)
++		return NULL;
++
++	p = fdt_getprop(fdt, off, "atag,devinfo", &len);
++	if (!p || len < 4)
++		return NULL;
++
++	/* atag,devinfo is a native-endian struct, not FDT big-endian cells. */
++	size = p[0];
++	if (size > 300 || 4 + size * 4 > len)
++		return NULL;
++
++	hrid_size = 2;
++	if (size >= 11 && (p[11] & 0xffff0000) == 0x56ab0000) {
++		hrid_size = p[11] & 0xffff;
++		if (hrid_size > 8)
++			hrid_size = 8;
++		else if (hrid_size < 2)
++			hrid_size = 2;
++	}
++
++	if (size < 12 + hrid_size)
++		return NULL;
++
++	for (i = 0; i < hrid_size; i++) {
++		u32 v = p[13 + i];
++
++		for (j = 0; j < 4; j++)
++			pos += sprintf(serial + pos, "%02x",
++				       (v >> (8 * j)) & 0xff);
++	}
++	serial[pos] = '\0';
++
++	return pos ? serial : NULL;
++}
++
++int board_init(void)
++{
++	/* Address of the ATAG/boot parameters block passed to Linux. */
++	gd->bd->bi_boot_params = CFG_SYS_SDRAM_BASE + 0x100;
++
++	/* Blue: board_init reached, C framebuffer write works. */
++	gkiw_usb_stage(1);
++
++	return 0;
++}
++
++int board_late_init(void)
++{
++	/* Cyan: board_late_init reached. */
++	gkiw_usb_stage(2);
++
++#if CONFIG_IS_ENABLED(CONSOLE_RECORD)
++	/* Start a clean recording for the fastboot session and crash log. */
++	console_record_reset_enable();
++#endif
++
++	env_set("board", "ktouch-i9");
++	{
++		const char *serial = gkiw_devinfo_serial();
++
++		if (serial)
++			env_set("serial#", serial);
++		else if (!env_get("serial#"))
++			env_set("serial#", "0123456789ABCDEF");
++	}
++
++	/* Beacon 4s: reached board_late_init. */
++	gkiw_beacon(4000);
++
++	/*
++	 * Probe the gadget only after initr_watchdog(), so a hang in MUSB/PHY
++	 * initialization is caught by the U-Boot watchdog instead of leaving
++	 * the board stuck before the timer is started.
++	 */
++	if (CONFIG_IS_ENABLED(USB_GADGET)) {
++		struct udevice *dev;
++		int ret;
++
++		printf("gkiw: probing MT6739 MUSB gadget\n");
++		/* Beacon 8s: about to enter MUSB/PHY init. */
++		gkiw_beacon(8000);
++		ret = uclass_get_device(UCLASS_USB_GADGET_GENERIC, 0, &dev);
++		if (ret) {
++			pr_err("%s: cannot find USB device (%d)\n", __func__, ret);
++			/* Beacon 10s: USB probe failed. */
++			gkiw_beacon(10000);
++		} else {
++			printf("gkiw: MUSB gadget ready\n");
++			/* Beacon 12s: USB probe succeeded. */
++			gkiw_beacon(12000);
++		}
++	}
++
++	return 0;
++}
++
++/*
++ * There is no BCB storage in the development bootloader.  A reset makes the
++ * stock first stage load the flashed second stage again, which is exactly what
++ * `fastboot reboot-bootloader` is supposed to do.
++ */
++int fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
++{
++	return 0;
++}
+diff --git a/drivers/usb/musb-new/Kconfig b/drivers/usb/musb-new/Kconfig
+index 208e47d8..f8912b48 100644
+--- a/drivers/usb/musb-new/Kconfig
++++ b/drivers/usb/musb-new/Kconfig
+@@ -68,6 +68,14 @@ config USB_MUSB_MT85XX
+ 	  DMA controllers are ignored. This driver follow musb-new
+ 	  driver and usb gadget framework.
+ 
++config USB_MUSB_MT6739
++	bool "Enable MediaTek MT6739 MUSB controller"
++	depends on ARCH_MEDIATEK
++	select USB_MUSB_PIO_ONLY
++	help
++	  Say y to enable the MediaTek MT6739 MUSB controller.  It uses the
++	  Mentor Graphics MUSB gadget core and the MediaTek USB 2.0 PHY.
++
+ config USB_MUSB_PIC32
+ 	bool "Enable Microchip PIC32 DRC USB controller"
+ 	depends on MACH_PIC32
+diff --git a/drivers/usb/musb-new/Makefile b/drivers/usb/musb-new/Makefile
+index 6638772d..97618cbc 100644
+--- a/drivers/usb/musb-new/Makefile
++++ b/drivers/usb/musb-new/Makefile
+@@ -9,6 +9,7 @@ obj-$(CONFIG_USB_MUSB_DSPS) += musb_dsps.o
+ obj-$(CONFIG_USB_MUSB_DA8XX)	+= da8xx.o
+ obj-$(CONFIG_USB_MUSB_AM35X) += am35x.o
+ obj-$(CONFIG_USB_MUSB_MT85XX) += mt85xx.o
++obj-$(CONFIG_USB_MUSB_MT6739) += mt6739.o
+ obj-$(CONFIG_USB_MUSB_OMAP2PLUS) += omap2430.o
+ obj-$(CONFIG_USB_MUSB_PIC32) += pic32.o
+ obj-$(CONFIG_USB_MUSB_SUNXI) += sunxi.o
+diff --git a/drivers/usb/musb-new/mt6739.c b/drivers/usb/musb-new/mt6739.c
+new file mode 100644
+index 00000000..507137d1
+--- /dev/null
++++ b/drivers/usb/musb-new/mt6739.c
+@@ -0,0 +1,261 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * MediaTek MT6739 MUSB glue layer.
++ *
++ * The MT6739 integrates a Mentor Graphics MUSB controller with a MediaTek
++ * USB 2.0 PHY.  The stock first stage has already powered the PHY rails, but
++ * it may gate the controller clock before jumping, so this glue re-enables the
++ * USB gates and mux, releases the PHY, forces device mode and hands the
++ * controller to the generic MUSB gadget core.
++ *
++ * Based on drivers/usb/musb-new/mt85xx.c (GPL-2.0), reduced to what the
++ * development second stage needs.
++ */
++
++#include <dm.h>
++#include <dm/device_compat.h>
++#include <dm/read.h>
++#include <asm/io.h>
++#include <linux/bitops.h>
++#include <linux/delay.h>
++#include <linux/printk.h>
++#include <linux/usb/musb.h>
++#include <usb.h>
++#include "linux-compat.h"
++#include "musb_core.h"
++#include "musb_uboot.h"
++
++extern void gkiw_usb_stage(int stage);
++
++struct mt6739_musb_glue {
++	struct musb_host_data mdata;
++	void __iomem *phy;
++	struct device dev;
++};
++
++#define to_mt6739_musb_glue(d)	container_of(d, struct mt6739_musb_glue, dev)
++
++/*
++ * The MT6739 T-PHY is the "usb-phy@800" child of the 0x11cc0000 block; the
++ * vendor macros also add 0x800 to the second "reg" base.  Keep the offset
++ * explicit so a DT that points at the block base works too.
++ */
++#define MTK_USBPHY_OFFSET		0x800
++
++/* MT6739 USB 2.0 PHY registers, relative to the PHY port. */
++#define MTK_USBPHY_GPIO_CTL		0x20
++#define MTK_USBPHY_USB_CTL		0x68
++#define MTK_USBPHY_MISC			0x6c
++
++/*
++ * Clock control.  The MT6739 kernel clock driver describes CLK_INFRA_ICUSB as
++ * an active-low gate in INFRA_AO (MODULE_SW_CG_0_CLR) and CLK_TOP_USB_TOP_SEL
++ * as a mux in TOPCKGEN (CLK_CFG_7, updated by CLK_CFG_UPDATE bit 30).
++ * U-Boot has no MT6739 clock driver yet, and the first stage may gate the
++ * controller before booting U-Boot, so program the two registers directly.
++ */
++#define MTK_INFRA_AO_BASE		0x10001000
++#define MTK_INFRA0_CG_CLR		0x84
++#define MTK_INFRA_ICUSB_BIT		8
++
++#define MTK_TOPCKGEN_BASE		0x10000000
++#define MTK_CLK_CFG_UPDATE		0x04
++#define MTK_CLK_CFG_7_SET		0xb4
++#define MTK_USB_TOP_SEL_BIT		24
++#define MTK_USB_TOP_UPDATE_BIT		30
++
++static void mt6739_usb_clocks_enable(void)
++{
++	void __iomem *infra = (void __iomem *)MTK_INFRA_AO_BASE;
++	void __iomem *top = (void __iomem *)MTK_TOPCKGEN_BASE;
++
++	/* usb_top_sel = univpll3_d4 (parent index 1). */
++	writel(BIT(MTK_USB_TOP_SEL_BIT), top + MTK_CLK_CFG_7_SET);
++	setbits_le32(top + MTK_CLK_CFG_UPDATE, BIT(MTK_USB_TOP_UPDATE_BIT));
++	udelay(20);
++
++	/* infra_icusb gate is active-low: clear it to enable the clock. */
++	writel(BIT(MTK_INFRA_ICUSB_BIT), infra + MTK_INFRA0_CG_CLR);
++	udelay(20);
++}
++
++static void mt6739_usb_phy_recover(void __iomem *phy)
++{
++	/* The vendor glue waits 10 ms after enabling the controller clock. */
++	mdelay(10);
++
++	/* Wait for the PHY 3.3 V / 1.8 V rails to settle. */
++	udelay(50);
++
++	/* Leave UART/JTAG mode. */
++	clrbits_le32(phy + 0x1c, BIT(12));
++	clrbits_le32(phy + MTK_USBPHY_USB_CTL, BIT(26));
++	clrbits_le32(phy + MTK_USBPHY_MISC, BIT(16));
++	clrbits_le32(phy + MTK_USBPHY_GPIO_CTL, BIT(9) | BIT(8));
++
++	/* dp_100k_mode = 1; dp/dm_100k_en = 0. */
++	setbits_le32(phy + MTK_USBPHY_GPIO_CTL, BIT(18));
++	clrbits_le32(phy + MTK_USBPHY_GPIO_CTL, BIT(16) | BIT(17));
++
++	/* Release suspend and the test pulls. */
++	clrbits_le32(phy + MTK_USBPHY_USB_CTL, BIT(18));
++	clrbits_le32(phy + MTK_USBPHY_USB_CTL,
++		     BIT(6) | BIT(7) | (0x3 << 4) | BIT(2) | (0xf << 10));
++	clrbits_le32(phy + MTK_USBPHY_USB_CTL,
++		     BIT(20) | BIT(21) | BIT(19) | BIT(17) | BIT(23));
++	clrbits_le32(phy + 0x18, BIT(23));
++
++	udelay(800);
++
++	/* LK/recover: enable VBUS comparator and set PHY_REV to 0x40. */
++	setbits_le32(phy + 0x18, BIT(20));
++	clrbits_le32(phy + 0x18, 0xff << 24);
++	setbits_le32(phy + 0x18, 0x40 << 24);
++
++	/* Force device mode: VBUSVALID/AVALID/BVALID/IDDIG/IDPULLUP. */
++	clrsetbits_le32(phy + MTK_USBPHY_MISC, 0x10, 0x2f);
++	setbits_le32(phy + MTK_USBPHY_MISC, 0x3f << 8);
++}
++
++static irqreturn_t mt6739_musb_interrupt(int irq, void *__hci)
++{
++	struct musb *musb = __hci;
++	irqreturn_t retval = IRQ_NONE;
++
++	musb->int_usb = musb_readb(musb->mregs, MUSB_INTRUSB);
++	if (musb->int_usb) {
++		if (musb->int_usb & MUSB_INTR_RESET)
++			gkiw_usb_stage(6);
++		if (musb->int_usb & MUSB_INTR_CONNECT)
++			gkiw_usb_stage(7);
++		musb_writeb(musb->mregs, MUSB_INTRUSB, musb->int_usb);
++	}
++	musb->int_tx = musb_readw(musb->mregs, MUSB_INTRTX);
++	if (musb->int_tx)
++		musb_writew(musb->mregs, MUSB_INTRTX, musb->int_tx);
++	musb->int_rx = musb_readw(musb->mregs, MUSB_INTRRX);
++	if (musb->int_rx)
++		musb_writew(musb->mregs, MUSB_INTRRX, musb->int_rx);
++
++	if (musb->int_usb || musb->int_tx || musb->int_rx)
++		retval = musb_interrupt(musb);
++
++	return retval;
++}
++
++static int mt6739_musb_init(struct musb *musb)
++{
++	musb->isr = mt6739_musb_interrupt;
++
++	return 0;
++}
++
++static int mt6739_musb_enable(struct musb *musb)
++{
++	struct mt6739_musb_glue *glue = to_mt6739_musb_glue(musb->controller);
++
++	musb_ep_select(musb->mregs, 0);
++	musb_writeb(musb->mregs, MUSB_FADDR, 0);
++
++	mt6739_usb_phy_recover(glue->phy);
++
++	return 0;
++}
++
++static void mt6739_musb_disable(struct musb *musb)
++{
++}
++
++static const struct musb_platform_ops mt6739_musb_ops = {
++	.init		= mt6739_musb_init,
++	.enable		= mt6739_musb_enable,
++	.disable	= mt6739_musb_disable,
++};
++
++#define MT6739_MUSB_MAX_EP_NUM	8
++#define MT6739_MUSB_RAM_BITS	16
++
++static struct musb_fifo_cfg mt6739_musb_mode_cfg[] = {
++	MUSB_EP_FIFO_SINGLE(1, FIFO_TX, 512),
++	MUSB_EP_FIFO_SINGLE(1, FIFO_RX, 512),
++	MUSB_EP_FIFO_SINGLE(2, FIFO_TX, 512),
++	MUSB_EP_FIFO_SINGLE(2, FIFO_RX, 512),
++	MUSB_EP_FIFO_SINGLE(3, FIFO_TX, 512),
++	MUSB_EP_FIFO_SINGLE(3, FIFO_RX, 512),
++	MUSB_EP_FIFO_SINGLE(4, FIFO_TX, 512),
++	MUSB_EP_FIFO_SINGLE(4, FIFO_RX, 512),
++	MUSB_EP_FIFO_SINGLE(5, FIFO_TX, 512),
++	MUSB_EP_FIFO_SINGLE(5, FIFO_RX, 512),
++	MUSB_EP_FIFO_SINGLE(6, FIFO_TX, 512),
++	MUSB_EP_FIFO_SINGLE(6, FIFO_RX, 512),
++	MUSB_EP_FIFO_SINGLE(7, FIFO_TX, 512),
++	MUSB_EP_FIFO_SINGLE(7, FIFO_RX, 512),
++};
++
++static struct musb_hdrc_config mt6739_musb_config = {
++	.fifo_cfg	= mt6739_musb_mode_cfg,
++	.fifo_cfg_size	= ARRAY_SIZE(mt6739_musb_mode_cfg),
++	.multipoint	= true,
++	.dyn_fifo	= true,
++	.num_eps	= MT6739_MUSB_MAX_EP_NUM,
++	.ram_bits	= MT6739_MUSB_RAM_BITS,
++};
++
++static int mt6739_musb_probe(struct udevice *dev)
++{
++	struct mt6739_musb_glue *glue = dev_get_priv(dev);
++	struct musb_host_data *host = &glue->mdata;
++	struct musb_hdrc_platform_data pdata;
++	void *base = dev_read_addr_ptr(dev);
++
++	if (!base)
++		return -EINVAL;
++
++	glue->phy = dev_read_addr_index_ptr(dev, 1);
++	if (!glue->phy)
++		return -EINVAL;
++	glue->phy += MTK_USBPHY_OFFSET;
++
++	mt6739_usb_clocks_enable();
++
++	memset(&pdata, 0, sizeof(pdata));
++	pdata.min_power = 250;	/* 500 mA, in mA/2 units */
++	pdata.platform_ops = &mt6739_musb_ops;
++	pdata.config = &mt6739_musb_config;
++	pdata.mode = MUSB_PERIPHERAL;
++
++	host->host = musb_register(&pdata, &glue->dev, base);
++	if (!host->host)
++		return -EIO;
++
++	printf("MT6739 MUSB OTG (Peripheral)\n");
++
++	return 0;
++}
++
++static int mt6739_musb_remove(struct udevice *dev)
++{
++	struct mt6739_musb_glue *glue = dev_get_priv(dev);
++	struct musb_host_data *host = &glue->mdata;
++
++	musb_stop(host->host);
++	free(host->host);
++	host->host = NULL;
++
++	return 0;
++}
++
++static const struct udevice_id mt6739_musb_ids[] = {
++	{ .compatible = "mediatek,mt6739-usb20" },
++	{ }
++};
++
++U_BOOT_DRIVER(mt6739_musb) = {
++	.name		= "mt6739_musb",
++	.id		= UCLASS_USB_GADGET_GENERIC,
++	.of_match	= mt6739_musb_ids,
++	.probe		= mt6739_musb_probe,
++	.remove		= mt6739_musb_remove,
++	.plat_auto	= sizeof(struct usb_plat),
++	.priv_auto	= sizeof(struct mt6739_musb_glue),
++};
+diff --git a/include/configs/mt6739.h b/include/configs/mt6739.h
+new file mode 100644
+index 00000000..43d43008
+--- /dev/null
++++ b/include/configs/mt6739.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Configuration for the MediaTek MT6739 development board.
++ */
++
++#ifndef __MT6739_H
++#define __MT6739_H
++
++#define CFG_SYS_SDRAM_BASE	0x40000000
++#define CFG_SYS_SDRAM_SIZE	0x20000000
++
++#define CFG_SYS_NS16550_COM1	0x11002000
++#define CFG_SYS_NS16550_CLK	26000000
++
++#endif

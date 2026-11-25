@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Core kernel options for the K-Touch i9 harness. In-tree only, so =y is
+# correct. gki_world drivers stay modules and are not selected here.
+#
+# The MT6739 Linux devicetree is still to be added; these options are the ones
+# the second-stage boot loop needs once it exists.
+
+CONFIG_PSTORE=y
+CONFIG_PSTORE_RAM=y
+CONFIG_PSTORE_CONSOLE=y
+CONFIG_PSTORE_PMSG=y
+CONFIG_PSTORE_FTRACE=y
+
+CONFIG_MAGIC_SYSRQ=y
+CONFIG_DEBUG_FS=y
+
+# Keep a wedged boot from hanging the harness.
+CONFIG_PANIC_ON_OOPS=y
+CONFIG_PANIC_TIMEOUT=10
+
+# The 2ndstage watchdog is the recovery path until the USB ACM shell works.
+# Do not let Linux take over the MTK TOPRGU yet.
+# CONFIG_MEDIATEK_WATCHDOG is not set

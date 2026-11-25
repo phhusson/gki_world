@@ -12,11 +12,11 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../../.." && pwd)
 
-SOC_CONF=$ROOT/soc/amlogic/g12a/harness/2ndstage.conf
+TARGET_CONF=$ROOT/soc/amlogic/g12a/harness/2ndstage.conf
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--soc)
-		SOC_CONF=$2
+		TARGET_CONF=$2
 		shift 2
 		;;
 	--src)
@@ -39,10 +39,10 @@ while [ $# -gt 0 ]; do
 done
 
 . "$ROOT/global/harness/2ndstage/uboot.conf"
-. "$SOC_CONF"
+. "$TARGET_CONF"
 
 UBOOT_SRC=${UBOOT_SRC:-$ROOT/.bootloader/u-boot}
-BUILD=${BUILD:-$ROOT/.bootloader/build-g12a}
+BUILD=${BUILD:-$ROOT/.bootloader/build-${UBOOT_PLATFORM:-g12a}}
 JOBS=${JOBS:-$(nproc)}
 CROSS_COMPILE=${CROSS_COMPILE:-aarch64-linux-gnu-}
 
@@ -57,10 +57,36 @@ git -C "$UBOOT_SRC" checkout -q -f --detach FETCH_HEAD
 git -C "$UBOOT_SRC" reset -q --hard FETCH_HEAD
 git -C "$UBOOT_SRC" clean -qfd
 
-for patch in "$ROOT"/global/harness/2ndstage/patches/*.patch; do
+# Generic patches live in global/, SoC support patches in the SoC layer and
+# board patches in the device layer.  Sort the union by basename so the
+# numbered series (0001..0013, 0100..) applies in order regardless of which
+# directory a patch lives in.
+PATCH_LIST=$(mktemp)
+PATCH_SORTED=$(mktemp)
+trap 'rm -f "$PATCH_LIST" "$PATCH_SORTED"' EXIT
+
+for dir in "$ROOT/global/harness/2ndstage/patches" ${UBOOT_PATCH_DIRS:-}; do
+	case "$dir" in
+	/*) ;;
+	*) dir="$ROOT/$dir" ;;
+	esac
+	if [ ! -d "$dir" ]; then
+		echo "patch directory not found: $dir" >&2
+		exit 1
+	fi
+	for patch in "$dir"/*.patch; do
+		[ -e "$patch" ] || continue
+		echo "$patch" >> "$PATCH_LIST"
+	done
+done
+
+awk -F/ '{ print $NF "\t" $0 }' "$PATCH_LIST" |
+	LC_ALL=C sort -k1,1 | cut -f2- > "$PATCH_SORTED"
+
+while IFS= read -r patch; do
 	echo "applying $(basename "$patch")"
 	git -C "$UBOOT_SRC" apply "$patch"
-done
+done < "$PATCH_SORTED"
 
 mkdir -p "$BUILD"
 make -C "$UBOOT_SRC" O="$BUILD" "$UBOOT_BASE_DEFCONFIG"
@@ -72,8 +98,20 @@ make -C "$UBOOT_SRC" O="$BUILD" -j"$JOBS" CROSS_COMPILE="$CROSS_COMPILE"
 GKIW_BOOTIMG_BASE="$GKIW_BOOTIMG_BASE" \
 GKIW_BOOTIMG_HEADER_SIZE="$GKIW_BOOTIMG_HEADER_SIZE" \
 GKIW_BOOTIMG_PAGESIZE="$GKIW_BOOTIMG_PAGESIZE" \
+GKIW_BOOTIMG_KERNEL_OFFSET="${GKIW_BOOTIMG_KERNEL_OFFSET:-0x0}" \
+GKIW_BOOTIMG_RAMDISK_OFFSET="${GKIW_BOOTIMG_RAMDISK_OFFSET:-}" \
+GKIW_BOOTIMG_SECOND_OFFSET="${GKIW_BOOTIMG_SECOND_OFFSET:-}" \
+GKIW_BOOTIMG_TAGS_OFFSET="${GKIW_BOOTIMG_TAGS_OFFSET:-}" \
+GKIW_BOOTIMG_CMDLINE="${GKIW_BOOTIMG_CMDLINE:-}" \
+GKIW_BOOTIMG_COMPRESS="${GKIW_BOOTIMG_COMPRESS:-none}" \
+GKIW_BOOTIMG_DUMMY_RAMDISK="${GKIW_BOOTIMG_DUMMY_RAMDISK:-0}" \
+GKIW_BOOTIMG_DUMMY_RAMDISK_SIZE="${GKIW_BOOTIMG_DUMMY_RAMDISK_SIZE:-0}" \
+GKIW_BOOTIMG_KERNEL_PAD_SIZE="${GKIW_BOOTIMG_KERNEL_PAD_SIZE:-0}" \
+GKIW_BOOTIMG_RAMDISK="${GKIW_BOOTIMG_RAMDISK:-}" \
+GKIW_BOOTIMG_APPEND_DTB="${GKIW_BOOTIMG_APPEND_DTB:-0}" \
 "$ROOT/global/harness/2ndstage/scripts/mkbootimg.sh" \
-	"$BUILD/u-boot-dtb.bin" "$BUILD/gkiw-2ndstage-flash.img"
+	"$BUILD/u-boot-dtb.bin" "$BUILD/gkiw-2ndstage-flash.img" \
+	"${GKIW_BOOTIMG_DTB:-$BUILD/u-boot.dtb}"
 
 rm -f "$BUILD/gkiw-2ndstage-boot.img" "$BUILD/gkiw-2ndstage-selfboot.img" "$BUILD/gkiw-2ndstage-fastboot.img"
 echo "built: $BUILD/u-boot.bin"

@@ -1,0 +1,9 @@
+schema: 1
+kind: device
+id: device/ktouch/i9
+description: K-Touch i9 (Anica i9, MT6739)
+requires:
+  - soc/mediatek/mt6739
+maintainers:
+  - "@phhusson"
+status: wip

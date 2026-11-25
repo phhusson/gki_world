@@ -1,0 +1,149 @@
+diff --git a/arch/arm/dts/Makefile b/arch/arm/dts/Makefile
+index 22f10c8e..7d75a918 100644
+--- a/arch/arm/dts/Makefile
++++ b/arch/arm/dts/Makefile
+@@ -1055,6 +1055,7 @@ mt8391-genio-720-evk-ufs-edp-dtbs := mt8391-genio-720-evk.dtb \
+ 				     mt8371-genio-common-edp.dtbo
+ 
+ dtb-$(CONFIG_ARCH_MEDIATEK) += \
++	mt6739-ktouch-i9.dtb \
+ 	mt7622-rfb.dtb \
+ 	mt7623a-unielec-u7623-02-emmc.dtb \
+ 	mt7622-bananapi-bpi-r64.dtb \
+diff --git a/arch/arm/dts/mt6739-ktouch-i9.dts b/arch/arm/dts/mt6739-ktouch-i9.dts
+new file mode 100644
+index 00000000..2c02df2b
+--- /dev/null
++++ b/arch/arm/dts/mt6739-ktouch-i9.dts
+@@ -0,0 +1,86 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * gki_world development bootloader device tree for the K-Touch i9 (MT6739).
++ *
++ * Deliberately minimal: UART, USB gadget and the watchdog only.  The stock
++ * first stage has already configured DDR, the UART pinmux and the USB clocks;
++ * this tree describes just enough for U-Boot to use them.
++ *
++ * Memory is described as the 512 MiB floor the second stage assumes.  The
++ * phone has at least 2 GiB, but Linux gets its real size from the device tree
++ * it is booted with, not from this one.
++ */
++
++/dts-v1/;
++
++/ {
++	model = "gki_world K-Touch i9 development board";
++	compatible = "gkiw,ktouch-i9", "mediatek,mt6739";
++
++	#address-cells = <2>;
++	#size-cells = <2>;
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	chosen {
++		stdout-path = "serial0:921600n8";
++	};
++
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0x0 0x40000000 0x0 0x20000000>; /* 512 MiB floor */
++	};
++
++	cpus {
++		#address-cells = <1>;
++		#size-cells = <0>;
++		enable-method = "psci";
++
++		cpu@0 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a53";
++			reg = <0x0>;
++		};
++
++		cpu@1 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a53";
++			reg = <0x1>;
++		};
++
++		cpu@2 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a53";
++			reg = <0x2>;
++		};
++
++		cpu@3 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a53";
++			reg = <0x3>;
++		};
++	};
++
++	uart0: serial@11002000 {
++		compatible = "mediatek,mt6577-uart";
++		reg = <0x0 0x11002000 0x0 0x1000>;
++		clock-frequency = <26000000>;
++		status = "okay";
++	};
++
++	watchdog@10007000 {
++		compatible = "mediatek,mt6739-wdt", "mediatek,wdt";
++		reg = <0x0 0x10007000 0x0 0x1000>;
++		status = "okay";
++	};
++
++	usb0: usb@11200000 {
++		compatible = "mediatek,mt6739-usb20";
++		reg = <0x0 0x11200000 0x0 0x10000>,	/* MUSB */
++		      <0x0 0x11cc0000 0x0 0x10000>;	/* USB 2.0 PHY */
++		dr_mode = "peripheral";
++		status = "okay";
++	};
++};
+diff --git a/configs/mt6739_ktouch_i9_defconfig b/configs/mt6739_ktouch_i9_defconfig
+new file mode 100644
+index 00000000..772a679a
+--- /dev/null
++++ b/configs/mt6739_ktouch_i9_defconfig
+@@ -0,0 +1,39 @@
++CONFIG_ARM=y
++CONFIG_POSITION_INDEPENDENT=y
++CONFIG_ARCH_MEDIATEK=y
++CONFIG_TEXT_BASE=0x40081000
++CONFIG_SYS_MALLOC_LEN=0x1000000
++CONFIG_SYS_MALLOC_F_LEN=0x4000
++CONFIG_HAS_CUSTOM_SYS_INIT_SP_ADDR=y
++CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x60000000
++# CONFIG_INIT_SP_RELATIVE is not set
++CONFIG_NR_DRAM_BANKS=1
++CONFIG_DEFAULT_DEVICE_TREE="mt6739-ktouch-i9"
++CONFIG_TARGET_MT6739=y
++CONFIG_SYS_LOAD_ADDR=0x50000000
++CONFIG_DEBUG_UART_BASE=0x11002000
++CONFIG_DEBUG_UART_CLOCK=26000000
++CONFIG_DEBUG_UART=y
++CONFIG_DEBUG_UART_BOARD_INIT=y
++CONFIG_BAUDRATE=921600
++CONFIG_DM_SERIAL=y
++CONFIG_MTK_SERIAL=y
++CONFIG_BOARD_LATE_INIT=y
++CONFIG_CMD_BOOTM=y
++CONFIG_ANDROID_BOOT_IMAGE=y
++CONFIG_USB_FUNCTION_FASTBOOT=y
++CONFIG_FASTBOOT_BUF_ADDR=0x50000000
++CONFIG_FASTBOOT_BUF_SIZE=0x08000000
++CONFIG_USB=y
++# MUSB uses its legacy gadget registration, not the DM UDC core.
++# CONFIG_DM_USB_GADGET is not set
++CONFIG_USB_MUSB_GADGET=y
++CONFIG_USB_MUSB_MT6739=y
++CONFIG_USB_GADGET=y
++CONFIG_USB_GADGET_VENDOR_NUM=0x0e8d
++CONFIG_USB_GADGET_PRODUCT_NUM=0x201c
++CONFIG_WDT=y
++CONFIG_WDT_MTK=y
++CONFIG_CMD_WDT=y
++CONFIG_BOOTCOMMAND="fastboot usb 0"
++CONFIG_BOOTDELAY=1

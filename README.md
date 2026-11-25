@@ -9,9 +9,10 @@ the ones you would actually send upstream.
 
 **Status: early scaffold.** The LTS and latest-release builds and the test
 module work. The first device (Archos 50b Helium, MSM8916) is scaffolded but
-does not boot yet. The normative design is
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the hands-on workflow is
-[docs/bringup.md](docs/bringup.md).
+does not boot yet. The development second stage builds for Amlogic G12A and
+MediaTek MT6739; the K-Touch i9 port is scaffolded but not booted. The normative
+design is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the hands-on
+workflow is [docs/bringup.md](docs/bringup.md).
 
 ## Layers
 

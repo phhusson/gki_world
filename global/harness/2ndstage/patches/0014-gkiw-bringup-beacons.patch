@@ -1,0 +1,19 @@
+diff --git a/cmd/Kconfig b/cmd/Kconfig
+index f98c2e47..a0bd7317 100644
+--- a/cmd/Kconfig
++++ b/cmd/Kconfig
+@@ -1248,6 +1248,14 @@ config GKIW_WDT_TIMEOUT_MS
+ 	  the bare "gkiw watchdog" command.  Keep it below the hardware limit:
+ 	  the MediaTek TOPRGU counter, for example, saturates at about 16 s.
+ 
++config GKIW_BRINGUP_BEACONS
++	bool "gkiw bringup watchdog beacons"
++	depends on CMD_GKIW
++	help
++	  Change the watchdog timeout at board milestones so the reset
++	  interval identifies where a board without a working console or
++	  fastboot hangs.  Development only.
++
+ config CMD_FASTBOOT_ABORT_KEYED
+ 	bool "fastboot abort with any key"
+ 	depends on CMD_FASTBOOT && USB_FUNCTION_FASTBOOT

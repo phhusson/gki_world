@@ -1,0 +1,6 @@
+# Fetch-only blobs for this device. None identified yet.
+#
+# Each entry needs: purpose, device_path, dump or url, sha256. Firmware is
+# never committed to the repository.
+
+firmware: []

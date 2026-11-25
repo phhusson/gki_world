@@ -1,0 +1,8 @@
+schema: 1
+kind: soc
+id: soc/mediatek/mt6739
+description: MediaTek MT6739 family (MT6739/MT6731/MT8765)
+requires:
+  - vendor/mediatek
+maintainers:
+  - "@phhusson"

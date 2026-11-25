@@ -1,0 +1,39 @@
+diff --git a/board/amlogic/u200/u200.c b/board/amlogic/u200/u200.c
+index 473fe6e3..2ba8df2e 100644
+--- a/board/amlogic/u200/u200.c
++++ b/board/amlogic/u200/u200.c
+@@ -5,7 +5,9 @@
+  */
+ 
+ #include <dm.h>
++#include <console.h>
+ #include <env.h>
++#include <fastboot.h>
+ #include <init.h>
+ #include <net.h>
+ #include <vsprintf.h>
+@@ -28,6 +30,11 @@ int meson_board_late_init(void)
+ 	char serial_hex[2 * SM_SERIAL_SIZE + 1];
+ 	int i;
+ 
++#if CONFIG_IS_ENABLED(CONSOLE_RECORD)
++	/* Start a clean recording for the fastboot session and crash log. */
++	console_record_reset_enable();
++#endif
++
+ 	if (!meson_sm_get_serial(serial, sizeof(serial))) {
+ 		for (i = 0; i < SM_SERIAL_SIZE; i++)
+ 			sprintf(serial_hex + 2 * i, "%02x", serial[i]);
+@@ -39,3 +46,12 @@ int meson_board_late_init(void)
+ 
+ 	return 0;
+ }
++
++/*
++ * No BCB storage in the dev bootloader. A reset makes the first stage reload
++ * this boot image, i.e. `fastboot reboot-bootloader` comes back here.
++ */
++int fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
++{
++	return 0;
++}

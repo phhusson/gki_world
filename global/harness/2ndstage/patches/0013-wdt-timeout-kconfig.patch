@@ -1,0 +1,48 @@
+diff --git a/cmd/Kconfig b/cmd/Kconfig
+index 45f5046c..f98c2e47 100644
+--- a/cmd/Kconfig
++++ b/cmd/Kconfig
+@@ -1239,6 +1239,15 @@ config GKIW_LOG_SIZE
+ 	default 0x20000
+ 	depends on CMD_GKIW
+ 
++config GKIW_WDT_TIMEOUT_MS
++	int "gkiw default watchdog timeout (ms)"
++	default 60000
++	depends on CMD_GKIW
++	help
++	  Timeout used when the watchdog is armed before booting Linux and by
++	  the bare "gkiw watchdog" command.  Keep it below the hardware limit:
++	  the MediaTek TOPRGU counter, for example, saturates at about 16 s.
++
+ config CMD_FASTBOOT_ABORT_KEYED
+ 	bool "fastboot abort with any key"
+ 	depends on CMD_FASTBOOT && USB_FUNCTION_FASTBOOT
+diff --git a/cmd/gkiw.c b/cmd/gkiw.c
+index 119c20bd..56071d89 100644
+--- a/cmd/gkiw.c
++++ b/cmd/gkiw.c
+@@ -12,13 +12,14 @@
+ #include <dm.h>
+ #include <gkiw.h>
+ #include <linux/string.h>
++#include <linux/stringify.h>
+ #include <linux/types.h>
+ #include <stdio.h>
+ #include <vsprintf.h>
+ #include <wdt.h>
+ #include <asm/ptrace.h>
+ 
+-#define GKIW_WDT_DEFAULT_MS	60000
++#define GKIW_WDT_DEFAULT_MS	CONFIG_GKIW_WDT_TIMEOUT_MS
+ #define GKIW_PSTORE_LINE	16
+ 
+ #define GKIW_LOG_MAGIC		0x474c4b32 /* "GLK2" */
+@@ -351,5 +352,6 @@ static int do_gkiw(struct cmd_tbl *cmdtp, int flag, int argc,
+ U_BOOT_CMD(gkiw, 6, 1, do_gkiw,
+ 	   "gki_world second-stage helpers",
+ 	   "pstore <addr> <size> [offset] [len] - hex dump a RAM/pstore region\n"
+-	   "gkiw watchdog [ms|off] - arm (default 60000 ms) or stop the watchdog\n"
++	   "gkiw watchdog [ms|off] - arm (default " __stringify(CONFIG_GKIW_WDT_TIMEOUT_MS)
++	   " ms) or stop the watchdog\n"
+ 	   "gkiw log [previous|current|clear] - show or clear the 2ndstage console log");

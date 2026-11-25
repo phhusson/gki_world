@@ -1,0 +1,43 @@
+diff --git a/drivers/fastboot/fb_usb.c b/drivers/fastboot/fb_usb.c
+index 569a181e..90413858 100644
+--- a/drivers/fastboot/fb_usb.c
++++ b/drivers/fastboot/fb_usb.c
+@@ -16,6 +16,10 @@
+ #include <linux/usb/gadget.h>
+ #include <u-boot/schedule.h>
+ 
++void __weak gkiw_usb_stage(int stage)
++{
++}
++
+ int fastboot_usb_run(int controller_index, void *buf_addr, u32 buf_size)
+ {
+ 	struct udevice *udc;
+@@ -26,19 +30,26 @@ int fastboot_usb_run(int controller_index, void *buf_addr, u32 buf_size)
+ 		pr_err("USB init failed: %d\n", ret);
+ 		return ret;
+ 	}
++	gkiw_usb_stage(1);
+ 
+ 	fastboot_init(buf_addr, buf_size);
+ 	g_dnl_clear_detach();
++	gkiw_usb_stage(2);
+ 
+ 	ret = g_dnl_register("usb_dnl_fastboot");
+-	if (ret)
++	if (ret) {
++		gkiw_usb_stage(4);
+ 		goto out_put;
++	}
++	gkiw_usb_stage(3);
+ 
+ 	if (!g_dnl_board_usb_cable_connected()) {
+ 		puts("\rUSB cable not detected.\n");
++		gkiw_usb_stage(4);
+ 		ret = -ENODEV;
+ 		goto out_unregister;
+ 	}
++	gkiw_usb_stage(5);
+ 
+ 	while (!g_dnl_detach()) {
+ #ifndef CONFIG_XPL_BUILD

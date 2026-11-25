@@ -2,13 +2,14 @@
 
 A development-only bootloader that shortens the edit/build/boot loop:
 
-- UART console, 115200.
+- UART console, target-specific baud (115200 on G12A, 921600 on MT6739).
 - One USB gadget function: Android fastboot over the SoC's DWC2 peripheral.
 - `fastboot boot` accepts an Android boot image (kernel + ramdisk + DTB).
 - `fastboot oem pstore:<addr>:<size>` streams a RAM region (pstore/ramoops from
   the previous boot) back to the host.
-- Immediately before booting, it arms the hardware watchdog for 60 seconds, so a
-  hung Linux resets the board instead of hanging the loop.
+- Immediately before booting, it arms the hardware watchdog for a
+  target-specific timeout, so a hung Linux resets the board instead of hanging
+  the loop.
 
 It is not part of a device's shipped stack and it is not a general-purpose
 bootloader. It exists to make kernel bringup fast.
@@ -36,8 +37,23 @@ Nothing else is forked. Rebase by bumping `uboot.conf` and refreshing the
 patches; the build script applies them to a clean tree every time.
 
 The mechanism lives here (`global/`), the board data lives in the SoC layer
-(`soc/amlogic/g12a/harness/`). A second Amlogic SoC or board adds data, not a
-second bootloader.
+(`soc/amlogic/g12a/harness/`) or, for a phone, in its device layer
+(`device/ktouch/i9/harness/`). A second SoC or board adds data and,
+where U-Boot does not already have it, a small set of SoC support patches; it
+does not fork the bootloader.
+
+Patch directories are selected per target:
+
+```text
+global/harness/2ndstage/patches/          # mechanism, shared by every SoC
+soc/amlogic/g12a/harness/patches/         # G12A devicetree/board hooks
+soc/mediatek/mt6739/harness/patches/      # MT6739 mach/board/MUSB support
+device/ktouch/i9/harness/patches/         # K-Touch i9 devicetree/defconfig
+```
+
+`UBOOT_PATCH_DIRS` in the target's `2ndstage.conf` lists the extra directories;
+the build sorts the union by basename so the numbered series still applies in
+order. The default build directory is `.bootloader/build-$UBOOT_PLATFORM`.
 
 ## Transport
 
@@ -122,7 +138,8 @@ so a Linux boot cannot overwrite it, and constrains `linux,cma` to 128–384 MiB
 so the CMA pool cannot overlap either region. `soc/amlogic/g12a/config.fragment`
 turns on pstore/ramoops and keeps the Meson watchdog off until ssh works.
 
-The prototype memory map is part of the contract:
+The G12A prototype memory map is part of the contract (the K-Touch i9 map is
+in [its harness README](../../../device/ktouch/i9/harness/README.md)):
 
 | Region | Address | Notes |
 |--------|---------|-------|
@@ -157,31 +174,76 @@ device configs.
 
 To port: pick a SoC with a usable first stage, write a minimal DTS with UART,
 DWC2 (or the SoC's peripheral controller) and the watchdog, put the buffers in
-the safe window, and reuse the three generic patches unchanged.
+the safe window, and reuse the generic patches unchanged. If U-Boot lacks a
+target or driver for the SoC, add it as a SoC-scoped patch directory; the
+MT6739 port is the example.
 
 ## Watchdog
 
-`fastboot_preboot()` arms the first watchdog device for 60 seconds before
-`bootm`. `CONFIG_WATCHDOG=y` makes U-Boot **service** it while it is running:
-the fastboot loop calls `schedule()`, which runs the cyclic reset every second.
+`fastboot_preboot()` arms the first watchdog device before `bootm`, using
+`CONFIG_GKIW_WDT_TIMEOUT_MS` (default 60 s). In the **working** state,
+`CONFIG_WATCHDOG=y` makes U-Boot **service** it while it is running: the
+fastboot loop calls `schedule()`, which runs the cyclic reset every second.
 When U-Boot jumps to Linux the cyclic servicing stops, the hardware timer keeps
-running, and Linux must take over within 60 seconds. If it does not, the board
-resets. The Meson counter is 16-bit at 1 ms, so the maximum is about 65 seconds.
+running, and Linux must take over within the configured timeout. If it does
+not, the board resets.
+
+The timeout is limited by the SoC, not by the harness. The Meson counter is
+16-bit at 1 ms (about 65 s), so G12A uses 60 s. The MT6739 TOPRGU counter is
+16-bit at 32768 Hz (about 16 s), so the K-Touch i9 fragment uses 15 s. Set it
+per target in the U-Boot config fragment.
 
 This is the intended behaviour for the development loop: U-Boot can wait in
 fastboot indefinitely, a kernel that panics or wedges comes back on its own, and
 a boot that must not be interrupted can use `gkiw watchdog off` from the UART
 before booting.
 
+### Bringup: do not service the watchdog in U-Boot yet
+
+`CONFIG_WATCHDOG` makes U-Boot pet the watchdog from `schedule()`. During
+bringup, leave it **unset**:
+
+```text
+# CONFIG_WATCHDOG is not set
+CONFIG_WATCHDOG_AUTOSTART=y
+CONFIG_WATCHDOG_TIMEOUT_MSECS=15000
+```
+
+U-Boot still starts the watchdog at init, but never services it. A hang before
+or during USB/fastboot initialization therefore resets the board instead of
+waiting for a human; that reset is the main debugging signal on a board with no
+working console or fastboot. The trade-off is that U-Boot also resets while it
+is sitting at the prompt, so use `gkiw watchdog off` on the UART, or set
+`CONFIG_WATCHDOG_AUTOSTART=n` temporarily, when you need to type commands.
+
+`CONFIG_WDT`, the SoC WDT driver and `CONFIG_CMD_WDT` stay enabled either way:
+the watchdog must still be armed by `fastboot_preboot()` before `bootm` and be
+controllable with `gkiw watchdog`.
+
+Enable `CONFIG_WATCHDOG=y` only once `fastboot devices` (or
+`gkiw-fastboot boot`) works reliably. At that point U-Boot may wait in fastboot
+indefinitely, and the watchdog protects the Linux handoff instead of U-Boot
+bringup.
+
+### Blind bringup: watchdog beacons
+
+If the board has no working console, `CONFIG_GKIW_BRINGUP_BEACONS` changes the
+watchdog timeout at board milestones. The reset interval then identifies the
+stage that hung: a short timeout means U-Boot got further than a long one. The
+K-Touch i9 target uses 4 s after `board_late_init`, 8 s before MUSB init, 10 s
+if the USB probe failed and 12 s if it succeeded; a hang before
+`board_late_init` keeps the 15 s autostart timeout. This is a development aid,
+not something to ship.
+
 ### Do not take over the watchdog yet
 
 Until the **USB ACM shell** is reachable from the host (`socat - /dev/ttyACM0`
-answers), the Linux kernel MUST NOT enable or pet the watchdog. The 60 s reset
-is the only way out of a hung kernel; if Linux takes over the timer, a wedged
-boot stops coming back and the loop needs a physical power cycle. Keep
-`CONFIG_MESON_WATCHDOG` off (and do not load it from the initramfs) until the
-shell is reliable. Then enable it deliberately, either in-kernel or with a
-userspace watchdog.
+answers), the Linux kernel MUST NOT enable or pet the watchdog. The
+second-stage reset is the only way out of a hung kernel; if Linux takes over
+the timer, a wedged boot stops coming back and the loop needs a physical power
+cycle. Keep the SoC watchdog driver off (and do not load it from the initramfs)
+until the shell is reliable. Then enable it deliberately, either in-kernel or
+with a userspace watchdog.
 
 See [global/harness/linux](../linux/README.md) for the ACM shell setup.
 
@@ -229,6 +291,12 @@ the running boot.
 global/harness/2ndstage/scripts/build.sh
 # -> .bootloader/build-g12a/gkiw-2ndstage-flash.img  (v0, stock first stage)
 #    .bootloader/build-g12a/u-boot.bin
+
+# another target: the config selects its own defconfig, fragment, patches and
+# GKIW_BOOTIMG_BASE, and names its build directory via UBOOT_PLATFORM
+global/harness/2ndstage/scripts/build.sh \
+    --soc device/ktouch/i9/harness/2ndstage.conf
+# -> .bootloader/build-ktouch-i9/gkiw-2ndstage-flash.img
 ```
 
 The v0 image is for the stock first stage. Self-chainloading was dropped: it
@@ -249,6 +317,49 @@ The source tree (`.bootloader/u-boot`) is managed: every run resets it to
 `uboot.conf`'s pinned commit and reapplies the patches.
 
 ### Boot image
+
+The image must satisfy the **stock first stage**, not a generic SoC datasheet.
+Before inventing an address, decode the device's stock `boot.img` (or a
+Lineage/TWRP `recovery.img` built for it) and copy the whole contract:
+
+| Field | Where it comes from | Why it matters |
+|-------|---------------------|----------------|
+| header version | `mkbootimg` header | LK may only parse v0/v3 |
+| page size | header | wrong pages shift every section |
+| base | header | LK may ignore offsets and use a fixed address |
+| kernel offset | header `kernel_addr - base` | the payload must land where LK jumps |
+| ramdisk offset | header | empty is fine, but the field still exists |
+| second offset/size | header | DTB may be in `second` or appended to the kernel |
+| tags offset | header | ATAG/boot params destination |
+| cmdline | header | MTK uses `bootopt=...` to select AArch64 |
+| compression | kernel magic | stock MTK kernels are usually `Image.gz` |
+| header flags | header | `booti` relocation/flags |
+
+A chainload payload can be perfect and still never run because one of these
+does not match. If the stock image is compressed, compress the 2ndstage kernel
+too (`GKIW_BOOTIMG_COMPRESS=gzip`). If LK expects a fixed address, set
+`GKIW_BOOTIMG_BASE` and `GKIW_BOOTIMG_KERNEL_OFFSET` so the header's
+`kernel_addr` matches it, and link U-Boot at `kernel_addr + header_size`.
+
+MTK example (K-Touch i9, taken from the LineageOS/TWRP `recovery.img`):
+
+```text
+base        0x40078000
+kernel      0x40080000   (offset 0x00008000)
+ramdisk     0x45000000   (offset 0x04f88000)
+second      0x40f00000   (offset 0x00e88000, size 0)
+tags        0x44000000   (offset 0x03f88000)
+pagesize    2048
+cmdline     bootopt=64S3,32N2,64N2 androidboot.selinux=permissive
+kernel      Image.gz (gzip) with the *device* DTB appended after the gzip stream
+second      empty; second_addr is still 0x40f00000
+```
+
+With the previous, guessed layout LK showed the bootlogo and then nothing; with
+the stock layout it at least proceeded to the unlocked-bootloader warning. That
+difference is the first-stage accepting the image, not U-Boot working yet.
+
+#### G12A example
 
 `gkiw-2ndstage-flash.img` is an Android v0 boot image: kernel load address
 `0x08000000`, page size 2048, empty ramdisk. The kernel is:
@@ -280,8 +391,12 @@ kernel load address has collided with the first stage's DTB. Move
 Board data:
 
 ```text
-soc/amlogic/g12a/harness/2ndstage.conf    # base defconfig, fragment, defaults
-soc/amlogic/g12a/harness/gkiw-g12a.config # UART + fastboot + watchdog + gkiw
+soc/amlogic/g12a/harness/2ndstage.conf     # base defconfig, fragment, defaults
+soc/amlogic/g12a/harness/gkiw-g12a.config  # UART + fastboot + watchdog + gkiw
+soc/amlogic/g12a/harness/patches/          # G12A DTS, memsize and board hooks
+device/ktouch/i9/harness/2ndstage.conf     # MT6739 phone: addresses and patches
+device/ktouch/i9/harness/patches/          # K-Touch i9 DTS and defconfig
+soc/mediatek/mt6739/harness/patches/       # MT6739 mach/board/MUSB support
 ```
 
 The base is `u200_defconfig`, the S905X2 reference board. The fragment switches
@@ -327,8 +442,12 @@ global/harness/2ndstage/host/gkiw-fastboot pstore \
   peripheral port and the eMMC right per board is expected.
 - **Pstore is best-effort.** If the first stage clears the reserved region, or
   the DT does not reserve it as `no-map`, there is nothing to read.
-- **Watchdog size.** 60 s is the prototype default; the hardware cannot go much
-  beyond 65 s.
+- **Watchdog size.** The timeout is capped by the SoC: about 65 s on Meson and
+  about 16 s on MT6739. Set `CONFIG_GKIW_WDT_TIMEOUT_MS` below the hardware
+  maximum or the driver clamps it silently.
+- **Serviced watchdog hides bringup hangs.** With `CONFIG_WATCHDOG=y`, a hang
+  in USB/fastboot init never resets because U-Boot pets the timer. Keep it off
+  until fastboot enumeration works; see the bringup note above.
 - **Android boot image only.** `fastboot boot` goes through U-Boot's Android
   image parser. Pack kernel/DT/initramfs with `mkbootimg`, not as raw files.
 - **No vendor fastboot.** The 2ndstage cannot restore the stock U-Boot. A reset

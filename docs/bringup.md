@@ -155,6 +155,38 @@ Flashing reminders:
 - a wrong `vendor_boot`/`dtbo` combination usually manifests as "no output at
   all", not as a driver failure.
 
+### Boot image contract
+
+Do not invent boot image addresses from the SoC name. Decode the device's stock
+`boot.img` (or a Lineage/TWRP `recovery.img` for the same model) and copy every
+field the first stage consumes:
+
+- base, kernel/ramdisk/second/tags offsets, and page size;
+- header version;
+- cmdline, including vendor options;
+- kernel compression (raw Image vs `Image.gz`);
+- whether `second` carries a DTB or is empty.
+
+For a 2ndstage payload this is not optional: LK often ignores the image base and
+jumps to a fixed kernel address, and MTK LK uses a `bootopt=` cmdline and a
+gzip-compressed kernel. A payload with the right U-Boot and the wrong boot image
+fields shows a bootlogo and then nothing.
+
+Worked example, K-Touch i9 (MT6739), from the LineageOS/TWRP recovery image:
+
+```text
+base 0x40078000, kernel 0x40080000, ramdisk 0x45000000,
+second 0x40f00000 (size 0), tags 0x44000000, pagesize 2048,
+cmdline "bootopt=64S3,32N2,64N2", kernel Image.gz with the *device* DTB
+appended (extract it from the stock/Lineage image; LK overlays dconfig/DTBO
+onto this DTB before jumping)
+```
+
+The 2ndstage tool exposes these as `GKIW_BOOTIMG_BASE`,
+`GKIW_BOOTIMG_KERNEL_OFFSET`, `GKIW_BOOTIMG_RAMDISK_OFFSET`,
+`GKIW_BOOTIMG_SECOND_OFFSET`, `GKIW_BOOTIMG_TAGS_OFFSET`,
+`GKIW_BOOTIMG_CMDLINE` and `GKIW_BOOTIMG_COMPRESS`.
+
 ### initramfs
 
 Default image: static C `init` that:

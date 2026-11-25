@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Core platform options for MT6739. These are in-tree, so =y is correct.
+# gki_world drivers are selected as modules separately.
+
+CONFIG_ARCH_MEDIATEK=y
+
+CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_CONSOLE=y
+CONFIG_SERIAL_8250_MT6577=y

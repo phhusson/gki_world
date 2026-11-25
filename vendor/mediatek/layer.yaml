@@ -1,0 +1,8 @@
+schema: 1
+kind: soc-vendor
+id: vendor/mediatek
+description: MediaTek SoCs
+requires:
+  - global
+maintainers:
+  - "@phhusson"
