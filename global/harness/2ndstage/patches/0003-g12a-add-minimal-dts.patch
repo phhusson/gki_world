@@ -1,9 +1,9 @@
 diff --git a/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts b/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts
 new file mode 100644
-index 00000000..ff259e95
+index 00000000..04a30323
 --- /dev/null
 +++ b/dts/upstream/src/arm64/amlogic/meson-g12a-gkiw.dts
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,81 @@
 +// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 +/*
 + * gki_world development bootloader device tree for Amlogic G12A.
@@ -72,6 +72,16 @@ index 00000000..ff259e95
 +	status = "okay";
 +};
 +
++/*
++ * The USB port is used as a peripheral for the 2ndstage fastboot and the
++ * Linux ACM shell. The DWC3 host would otherwise claim the port and see the
++ * host PC as a broken device.
++ */
 +&usb {
++	dr_mode = "peripheral";
 +	status = "okay";
++};
++
++&dwc3 {
++	status = "disabled";
 +};
