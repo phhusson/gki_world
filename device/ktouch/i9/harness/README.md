@@ -136,6 +136,24 @@ fastboot `serial#`. If the property is missing it falls back to
 Once the fastboot receive loop is reached, U-Boot disables `DISP_PWM0`
 (`0x1100e000`) to turn the backlight off while waiting.
 
+### Booting recovery
+
+`fastboot reboot recovery` sends the `reboot-recovery` command.  The 2ndstage
+implements it by setting the MT6356/MT6357 RTC `PDN1.FAC_RESET` bit through the
+PMIC wrapper, exactly like LK's own `reboot-recovery`.  On the next reset LK
+selects `RECOVERY_BOOT` and boots the `recovery` partition, so no `bootm`
+address or appended-DTB patching is involved.
+
+The recovery partition must contain a TWRP build with working USB (the generic
+internet builds do not have the USB fix):
+
+```sh
+fastboot flash recovery /path/to/patched-recovery.img
+```
+
+The patched image used during bringup is
+`~/tmp/android_device_ktouch_i9/recovery.img`.
+
 ### Blind boot progress
 
 `CONFIG_GKIW_BRINGUP_BEACONS=y` encodes progress in the watchdog timeout, since

@@ -1,8 +1,8 @@
 diff --git a/board/mediatek/mt6739/board.c b/board/mediatek/mt6739/board.c
-index cbfc4387..901c6fef 100644
+index cbfc4387..babc283a 100644
 --- a/board/mediatek/mt6739/board.c
 +++ b/board/mediatek/mt6739/board.c
-@@ -11,11 +11,13 @@
+@@ -11,17 +11,20 @@
  #include <config.h>
  #include <console.h>
  #include <dm.h>
@@ -16,10 +16,152 @@ index cbfc4387..901c6fef 100644
  #include <usb.h>
  #include <wdt.h>
  #include <asm/global_data.h>
-@@ -225,6 +227,55 @@ static const char *gkiw_devinfo_serial(void)
+ #include <asm/io.h>
+ #include <cpu_func.h>
+ #include <linux/bitops.h>
++#include <linux/delay.h>
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
+@@ -225,6 +228,190 @@ static const char *gkiw_devinfo_serial(void)
  	return pos ? serial : NULL;
  }
  
++/*
++ * The MT6356/MT6357 RTC lives behind the PMIC wrapper.  LK uses the RTC
++ * PDN1 factory-reset bit as its reboot-to-recovery request, so the second
++ * stage can implement fastboot reboot-recovery without MMC/BCB access.
++ */
++#define MTK_PWRAP_BASE		0x1000d000
++#define MTK_PWRAP_WACS2_CMD	(MTK_PWRAP_BASE + 0x09c)
++#define MTK_PWRAP_WACS2_RDATA	(MTK_PWRAP_BASE + 0x0a0)
++#define MTK_PWRAP_WACS2_VLDCLR	(MTK_PWRAP_BASE + 0x0a4)
++
++#define MTK_WACS_FSM_IDLE	0
++#define MTK_WACS_FSM_WFVLDCLR	6
++#define MTK_WACS_INIT_DONE	1
++
++#define MTK_RTC_BASE		0x980
++#define MTK_RTC_BBPU		(MTK_RTC_BASE + 0x088)
++#define MTK_RTC_PDN1		(MTK_RTC_BASE + 0x0b4)
++#define MTK_RTC_PROT		(MTK_RTC_BASE + 0x0bc)
++#define MTK_RTC_WRTGR		(MTK_RTC_BASE + 0x0c2)
++#define MTK_RTC_PROT_UNLOCK1	0x586a
++#define MTK_RTC_PROT_UNLOCK2	0x9136
++#define MTK_RTC_PDN1_FAC_RESET	BIT(4)
++#define MTK_RTC_BBPU_CBUSY	BIT(6)
++
++static int gkiw_pwrap_wait(u32 fsm)
++{
++	u32 i, val;
++
++	for (i = 0; i < 10000; i++) {
++		val = readl(MTK_PWRAP_WACS2_RDATA);
++		if (((val >> 16) & 7) == fsm &&
++		    ((val >> 21) & 1) == MTK_WACS_INIT_DONE)
++			return 0;
++		udelay(10);
++	}
++
++	return -ETIMEDOUT;
++}
++
++static int gkiw_pwrap_read(u32 reg, u16 *val)
++{
++	int ret;
++
++	ret = gkiw_pwrap_wait(MTK_WACS_FSM_IDLE);
++	if (ret)
++		return ret;
++
++	writel((reg >> 1) << 16, MTK_PWRAP_WACS2_CMD);
++	ret = gkiw_pwrap_wait(MTK_WACS_FSM_WFVLDCLR);
++	if (ret)
++		return ret;
++
++	*val = readl(MTK_PWRAP_WACS2_RDATA) & 0xffff;
++	writel(1, MTK_PWRAP_WACS2_VLDCLR);
++	return 0;
++}
++
++static int gkiw_pwrap_write(u32 reg, u16 val)
++{
++	int ret;
++
++	ret = gkiw_pwrap_wait(MTK_WACS_FSM_IDLE);
++	if (ret)
++		return ret;
++
++	writel(BIT(31) | ((reg >> 1) << 16) | val, MTK_PWRAP_WACS2_CMD);
++	return gkiw_pwrap_wait(MTK_WACS_FSM_IDLE);
++}
++
++static int gkiw_rtc_trigger(void)
++{
++	u32 i;
++	u16 val;
++	int ret;
++
++	ret = gkiw_pwrap_write(MTK_RTC_WRTGR, 1);
++	if (ret)
++		return ret;
++
++	for (i = 0; i < 1000; i++) {
++		ret = gkiw_pwrap_read(MTK_RTC_BBPU, &val);
++		if (ret)
++			return ret;
++		if (!(val & MTK_RTC_BBPU_CBUSY))
++			return 0;
++		udelay(10);
++	}
++
++	return -ETIMEDOUT;
++}
++
++static int gkiw_rtc_set_recovery(void)
++{
++	u16 pdn1;
++	int ret;
++
++	ret = gkiw_pwrap_write(MTK_RTC_PROT, MTK_RTC_PROT_UNLOCK1);
++	if (ret)
++		return ret;
++	ret = gkiw_rtc_trigger();
++	if (ret)
++		return ret;
++
++	ret = gkiw_pwrap_write(MTK_RTC_PROT, MTK_RTC_PROT_UNLOCK2);
++	if (ret)
++		return ret;
++	ret = gkiw_rtc_trigger();
++	if (ret)
++		return ret;
++
++	ret = gkiw_pwrap_read(MTK_RTC_PDN1, &pdn1);
++	if (ret)
++		return ret;
++
++	pdn1 |= MTK_RTC_PDN1_FAC_RESET;
++	ret = gkiw_pwrap_write(MTK_RTC_PDN1, pdn1);
++	if (ret)
++		return ret;
++
++	return gkiw_rtc_trigger();
++}
++
++int fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
++{
++	int ret;
++
++	if (reason != FASTBOOT_REBOOT_REASON_RECOVERY)
++		return 0;
++
++	ret = gkiw_rtc_set_recovery();
++	printf("gkiw: recovery reboot flag %s (%d)\n",
++	       ret ? "failed" : "set", ret);
++	return ret;
++}
++
 +/*
 + * OEM hook for the development loop.  "fastboot oem gkiw ..." runs a
 + * second-stage command and, for the watchdog, remembers the requested
@@ -72,3 +214,17 @@ index cbfc4387..901c6fef 100644
  int board_init(void)
  {
  	/* Address of the ATAG/boot parameters block passed to Linux. */
+@@ -286,12 +473,4 @@ int board_late_init(void)
+ 	return 0;
+ }
+ 
+-/*
+- * There is no BCB storage in the development bootloader.  A reset makes the
+- * stock first stage load the flashed second stage again, which is exactly what
+- * `fastboot reboot-bootloader` is supposed to do.
+- */
+-int fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
+-{
+-	return 0;
+-}
++
