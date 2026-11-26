@@ -124,6 +124,8 @@ U-Boot starts the timer at init but never pets it, so a hang in MUSB/PHY or
 fastboot initialization resets the phone instead of hanging silently. Once
 `fastboot devices` shows the phone, switch to `CONFIG_WATCHDOG=y` so U-Boot can
 sit in fastboot indefinitely. Until then, use `gkiw watchdog off` over UART if
+you have a console, or over USB with
+`fastboot oem board gkiw watchdog off` (and `... watchdog <ms>` to arm it), if
 you need more than 15 s at the prompt.
 
 ### Fastboot serial and backlight
