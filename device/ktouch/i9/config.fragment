@@ -36,3 +36,12 @@ CONFIG_SMP=y
 # Keep the default 52-bit-capable VA/relocatable layout for now; the PI
 # code falls back to 48-bit at runtime on the Cortex-A53 and we skip the
 # relocation pass when nokaslr gives us a 2 MiB-aligned physical base.
+
+# The Cortex-A53 is ARMv8.0: 48-bit VA, 40-bit PA, no MTE/LPA2.
+# Keep the generic defconfig from pulling in PTE attributes the A53 does
+# not implement.
+# CONFIG_ARM64_MTE is not set
+CONFIG_ARM64_VA_BITS_48=y
+# CONFIG_ARM64_VA_BITS_52 is not set
+CONFIG_ARM64_PA_BITS_48=y
+# CONFIG_ARM64_PA_BITS_52 is not set

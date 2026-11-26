@@ -10,7 +10,7 @@ index 7b574009f..10eacf1f3 100644
 +obj-y += gkiw_bringup.o
 diff --git a/arch/arm64/kernel/gkiw_bringup.c b/arch/arm64/kernel/gkiw_bringup.c
 new file mode 100644
-index 000000000..d50157d97
+index 000000000..65efae463
 --- /dev/null
 +++ b/arch/arm64/kernel/gkiw_bringup.c
 @@ -0,0 +1,58 @@
@@ -49,7 +49,7 @@ index 000000000..d50157d97
 + * the BSS clear.  The early assembly boot path writes to this through the
 + * initial identity map.
 + */
-+u32 gkiw_boot_markers[16] __aligned(8) = { 0x474b424d };
++u32 gkiw_boot_markers[32] __aligned(8) = { 0x474b424d };
 +
 +void gkiw_mark_enable(void)
 +{
@@ -73,7 +73,7 @@ index 000000000..d50157d97
 +	gkiw_marks->data[gkiw_marks->len] = '\0';
 +}
 diff --git a/arch/arm64/kernel/head.S b/arch/arm64/kernel/head.S
-index ca04b338c..94f23278c 100644
+index ca04b338c..92b8bbb2e 100644
 --- a/arch/arm64/kernel/head.S
 +++ b/arch/arm64/kernel/head.S
 @@ -83,6 +83,11 @@
@@ -110,7 +110,7 @@ index ca04b338c..94f23278c 100644
  	b	__primary_switch
  SYM_CODE_END(primary_entry)
  
-@@ -456,18 +469,31 @@ SYM_FUNC_END(set_cpu_boot_mode_flag)
+@@ -456,18 +469,55 @@ SYM_FUNC_END(set_cpu_boot_mode_flag)
   * If it isn't, park the CPU
   */
  	.section ".idmap.text","a"
@@ -120,6 +120,12 @@ index ca04b338c..94f23278c 100644
 +	add	x9, x9, :lo12:gkiw_boot_markers
 +	mov	w10, #\val
 +	str	w10, [x9, #\off]
++.endm
++
++.macro gkiw_mark_reg off, reg
++	adrp	x9, gkiw_boot_markers
++	add	x9, x9, :lo12:gkiw_boot_markers
++	str	\reg, [x9, #\off]
 +.endm
 +
  SYM_FUNC_START(__enable_mmu)
@@ -136,13 +142,32 @@ index ca04b338c..94f23278c 100644
 +	gkiw_mark 0x28, 0x3054		// "T0" ttbr0 loaded
  	load_ttbr1 x1, x1, x3
 +	gkiw_mark 0x2c, 0x3154		// "T1" ttbr1 loaded
++
++	gkiw_mark_reg 0x50, x0		// SCTLR value
++	gkiw_mark_reg 0x58, x2		// TTBR0
++	gkiw_mark_reg 0x60, x1		// TTBR1
++	mrs	x11, tcr_el1
++	gkiw_mark_reg 0x68, x11		// TCR
++	mrs	x11, mair_el1
++	gkiw_mark_reg 0x70, x11		// MAIR
++	mrs	x11, sctlr_el1
++	gkiw_mark_reg 0x78, x11		// current SCTLR
  
- 	set_sctlr_el1	x0
-+	gkiw_mark 0x30, 0x4d53		// "SM" sctlr/mmU on
+-	set_sctlr_el1	x0
++	msr	sctlr_el1, x0
++	gkiw_mark 0x30, 0x3153		// "S1" msr done, MMU on
++	isb
++	gkiw_mark 0x34, 0x3253		// "S2" isb done
++	ic	iallu
++	gkiw_mark 0x38, 0x3353		// "S3" ic iallu done
++	dsb	nsh
++	gkiw_mark 0x3c, 0x3453		// "S4" dsb done
++	isb
++	gkiw_mark 0x40, 0x3553		// "S5" final isb done
  
  	ret
  SYM_FUNC_END(__enable_mmu)
-@@ -506,10 +532,21 @@ SYM_FUNC_START_LOCAL(__no_granule_support)
+@@ -506,10 +556,21 @@ SYM_FUNC_START_LOCAL(__no_granule_support)
  SYM_FUNC_END(__no_granule_support)
  
  SYM_FUNC_START_LOCAL(__primary_switch)
@@ -164,7 +189,7 @@ index ca04b338c..94f23278c 100644
  	adrp	x1, early_init_stack
  	mov	sp, x1
  	mov	x29, xzr
-@@ -517,7 +554,18 @@ SYM_FUNC_START_LOCAL(__primary_switch)
+@@ -517,7 +578,18 @@ SYM_FUNC_START_LOCAL(__primary_switch)
  	mov	x1, x21				// pass the FDT
  	bl	__pi_early_map_kernel		// Map and relocate the kernel
  
