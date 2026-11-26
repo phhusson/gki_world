@@ -1,8 +1,8 @@
 diff --git a/board/mediatek/mt6739/board.c b/board/mediatek/mt6739/board.c
-index cbfc4387..8d49e976 100644
+index cbfc4387..2e19c50e 100644
 --- a/board/mediatek/mt6739/board.c
 +++ b/board/mediatek/mt6739/board.c
-@@ -11,17 +11,20 @@
+@@ -11,17 +11,21 @@
  #include <config.h>
  #include <console.h>
  #include <dm.h>
@@ -20,10 +20,11 @@ index cbfc4387..8d49e976 100644
  #include <cpu_func.h>
  #include <linux/bitops.h>
 +#include <linux/delay.h>
++#include <irq_func.h>
  
  DECLARE_GLOBAL_DATA_PTR;
  
-@@ -225,6 +228,200 @@ static const char *gkiw_devinfo_serial(void)
+@@ -225,6 +229,222 @@ static const char *gkiw_devinfo_serial(void)
  	return pos ? serial : NULL;
  }
  
@@ -198,6 +199,28 @@ index cbfc4387..8d49e976 100644
 +		return;
 +	}
 +
++	if (!strncmp(arg, "watchdog halt ", 14)) {
++		char cmd[64];
++		const char *ms = arg + 14;
++		char *end;
++
++		simple_strtoul(ms, &end, 10);
++		if (*end) {
++			fastboot_fail("bad watchdog timeout", response);
++			return;
++		}
++		snprintf(cmd, sizeof(cmd), "gkiw watchdog %s", ms);
++		if (run_command(cmd, 0)) {
++			fastboot_fail("watchdog arm failed", response);
++			return;
++		}
++		fastboot_okay(NULL, response);
++		printf("gkiw: watchdog halt self-test, %s ms\n", ms);
++		disable_interrupts();
++		for (;;)
++			asm volatile("wfi");
++	}
++
 +	if (!strncmp(arg, "watchdog ", 9)) {
 +		char cmd[64];
 +		const char *ms = arg + 9;
@@ -224,7 +247,7 @@ index cbfc4387..8d49e976 100644
  int board_init(void)
  {
  	/* Address of the ATAG/boot parameters block passed to Linux. */
-@@ -286,12 +483,4 @@ int board_late_init(void)
+@@ -286,12 +506,4 @@ int board_late_init(void)
  	return 0;
  }
  
