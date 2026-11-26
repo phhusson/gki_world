@@ -152,7 +152,7 @@ index ca04b338c..adcfba3c0 100644
  	br	x8
  SYM_FUNC_END(__primary_switch)
 diff --git a/arch/arm64/kernel/pi/map_kernel.c b/arch/arm64/kernel/pi/map_kernel.c
-index 659297f87..90c6828fe 100644
+index 659297f87..f8b1978f9 100644
 --- a/arch/arm64/kernel/pi/map_kernel.c
 +++ b/arch/arm64/kernel/pi/map_kernel.c
 @@ -20,6 +20,10 @@ extern const u8 __eh_frame_start[], __eh_frame_end[];
@@ -185,7 +185,7 @@ index 659297f87..90c6828fe 100644
  
  	if (twopass) {
 -		if (IS_ENABLED(CONFIG_RELOCATABLE))
-+		if (IS_ENABLED(CONFIG_RELOCATABLE)) {
++		if (IS_ENABLED(CONFIG_RELOCATABLE) && kaslr_offset) {
 +			GKIW_PI_MARK(13, 0x314b5034);
  			relocate_kernel(kaslr_offset);
 +		}

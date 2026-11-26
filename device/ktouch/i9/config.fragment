@@ -33,8 +33,6 @@ CONFIG_SMP=y
 
 # The Cortex-A53 has a 48-bit VA and no LVA.  Keep the early boot path simple
 # while the PI page-table code is being debugged.
-CONFIG_EXPERT=y
-CONFIG_ARM64_VA_BITS_48=y
-# CONFIG_ARM64_VA_BITS_52 is not set
-# CONFIG_RELOCATABLE is not set
-# CONFIG_RANDOMIZE_BASE is not set
+# Keep the default 52-bit-capable VA/relocatable layout for now; the PI
+# code falls back to 48-bit at runtime on the Cortex-A53 and we skip the
+# relocation pass when nokaslr gives us a 2 MiB-aligned physical base.
