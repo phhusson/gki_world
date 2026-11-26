@@ -1,0 +1,461 @@
+diff --git a/arch/arm64/kernel/Makefile b/arch/arm64/kernel/Makefile
+index 7b574009f..10eacf1f3 100644
+--- a/arch/arm64/kernel/Makefile
++++ b/arch/arm64/kernel/Makefile
+@@ -88,3 +88,5 @@ endif
+ 
+ # for cleaning
+ subdir- += vdso vdso32
++
++obj-y += gkiw_bringup.o
+diff --git a/arch/arm64/kernel/gkiw_bringup.c b/arch/arm64/kernel/gkiw_bringup.c
+new file mode 100644
+index 000000000..d50157d97
+--- /dev/null
++++ b/arch/arm64/kernel/gkiw_bringup.c
+@@ -0,0 +1,58 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * gki_world arm64 bringup breadcrumbs.
++ *
++ * A blind board has no usable serial console until the UART clock driver is
++ * ported.  Write short progress lines to a static RAM buffer inside the
++ * kernel image; the next second-stage boot uploads it over fastboot.  The
++ * buffer is in BSS, so it is mapped from the first instruction and is not
++ * handed out by the page allocator.
++ *
++ * This is a temporary bringup aid.
++ */
++
++#include <linux/init.h>
++#include <linux/kernel.h>
++#include <linux/string.h>
++#include <linux/sizes.h>
++
++#define GKIW_MARK_MAGIC		0x474b4d31	/* "GKM1" */
++#define GKIW_MARK_MAX		SZ_64K
++
++struct gkiw_mark_hdr {
++	u32 magic;
++	u32 len;
++	char data[];
++};
++
++static char gkiw_mark_buf[GKIW_MARK_MAX] __aligned(4096);
++static struct gkiw_mark_hdr *gkiw_marks;
++
++/*
++ * Initialised data, so it is present in the loaded image and is not wiped by
++ * the BSS clear.  The early assembly boot path writes to this through the
++ * initial identity map.
++ */
++u32 gkiw_boot_markers[16] __aligned(8) = { 0x474b424d };
++
++void gkiw_mark_enable(void)
++{
++}
++
++void gkiw_mark(const char *s)
++{
++	struct gkiw_mark_hdr *hdr;
++
++	hdr = (struct gkiw_mark_hdr *)gkiw_mark_buf;
++	if (!gkiw_marks) {
++		hdr->magic = GKIW_MARK_MAGIC;
++		hdr->len = 0;
++		hdr->data[0] = '\0';
++		gkiw_marks = hdr;
++	}
++
++	while (*s && gkiw_marks->len < GKIW_MARK_MAX - sizeof(*hdr) - 2)
++		gkiw_marks->data[gkiw_marks->len++] = *s++;
++	gkiw_marks->data[gkiw_marks->len++] = '\n';
++	gkiw_marks->data[gkiw_marks->len] = '\0';
++}
+diff --git a/arch/arm64/kernel/head.S b/arch/arm64/kernel/head.S
+index ca04b338c..adcfba3c0 100644
+--- a/arch/arm64/kernel/head.S
++++ b/arch/arm64/kernel/head.S
+@@ -83,6 +83,11 @@
+ 	 *  x21        primary_entry() .. start_kernel()        FDT pointer passed at boot in x0
+ 	 */
+ SYM_CODE_START(primary_entry)
++	/* gkiw: MMU-off entry breadcrumbs at physical 0x4e000000 */
++	movz	x9, #0x4e00, lsl #16
++	movz	w10, #0x454e
++	movk	w10, #0x5452, lsl #16
++	str	w10, [x9]
+ 	bl	record_mmu_state
+ 	bl	preserve_boot_args
+ 
+@@ -118,6 +123,10 @@ SYM_CODE_START(primary_entry)
+ 
+ 1:	mov	x0, x19
+ 	bl	init_kernel_el			// w0=cpu_boot_mode
++	movz	x9, #0x4e00, lsl #16
++	movz	w10, #0x4b45
++	movk	w10, #0x4d4c, lsl #16
++	str	w10, [x9, #4]
+ 	mov	x20, x0
+ 
+ 	/*
+@@ -127,6 +136,10 @@ SYM_CODE_START(primary_entry)
+ 	 * the TCR will have been set.
+ 	 */
+ 	bl	__cpu_setup			// initialise processor
++	movz	x9, #0x4e00, lsl #16
++	movz	w10, #0x5743
++	movk	w10, #0x4853, lsl #16
++	str	w10, [x9, #8]
+ 	b	__primary_switch
+ SYM_CODE_END(primary_entry)
+ 
+@@ -506,10 +519,21 @@ SYM_FUNC_START_LOCAL(__no_granule_support)
+ SYM_FUNC_END(__no_granule_support)
+ 
+ SYM_FUNC_START_LOCAL(__primary_switch)
++	movz	x9, #0x4e00, lsl #16
++	movz	w10, #0x5753
++	movk	w10, #0x3030, lsl #16
++	str	w10, [x9, #12]
+ 	adrp	x1, reserved_pg_dir
+ 	adrp	x2, __pi_init_idmap_pg_dir
+ 	bl	__enable_mmu
+ 
++	/* gkiw: post-MMU breadcrumbs in initialized kernel data */
++	adrp	x9, gkiw_boot_markers
++	add	x9, x9, :lo12:gkiw_boot_markers
++	movz	w10, #0x4d4d
++	movk	w10, #0x5531, lsl #16
++	str	w10, [x9, #0x10]
++
+ 	adrp	x1, early_init_stack
+ 	mov	sp, x1
+ 	mov	x29, xzr
+@@ -517,7 +541,18 @@ SYM_FUNC_START_LOCAL(__primary_switch)
+ 	mov	x1, x21				// pass the FDT
+ 	bl	__pi_early_map_kernel		// Map and relocate the kernel
+ 
++	adrp	x9, gkiw_boot_markers
++	add	x9, x9, :lo12:gkiw_boot_markers
++	movz	w10, #0x4d41
++	movk	w10, #0x5032, lsl #16
++	str	w10, [x9, #0x14]
++
+ 	ldr	x8, =__primary_switched
+ 	adrp	x0, KERNEL_START		// __pa(KERNEL_START)
++	adrp	x9, gkiw_boot_markers
++	add	x9, x9, :lo12:gkiw_boot_markers
++	movz	w10, #0x4a4d
++	movk	w10, #0x5033, lsl #16
++	str	w10, [x9, #0x18]
+ 	br	x8
+ SYM_FUNC_END(__primary_switch)
+diff --git a/arch/arm64/kernel/pi/map_kernel.c b/arch/arm64/kernel/pi/map_kernel.c
+index 659297f87..90c6828fe 100644
+--- a/arch/arm64/kernel/pi/map_kernel.c
++++ b/arch/arm64/kernel/pi/map_kernel.c
+@@ -20,6 +20,10 @@ extern const u8 __eh_frame_start[], __eh_frame_end[];
+ 
+ extern void idmap_cpu_replace_ttbr1(phys_addr_t pgdir);
+ 
++static volatile u32 gkiw_pi_markers[16] = { 0x474b5049 };
++
++#define GKIW_PI_MARK(i, v)	(gkiw_pi_markers[(i)] = (v))
++
+ static void __init map_segment(pgd_t *pg_dir, phys_addr_t *pgd, u64 va_offset,
+ 			       void *start, void *end, pgprot_t prot,
+ 			       bool may_use_cont, int root_level)
+@@ -45,6 +49,7 @@ static void __init map_kernel(u64 kaslr_offset, u64 va_offset, int root_level)
+ 	pgprot_t data_prot = PAGE_KERNEL;
+ 	pgprot_t prot;
+ 
++	GKIW_PI_MARK(10, 0x314b5031);
+ 	/*
+ 	 * External debuggers may need to write directly to the text mapping to
+ 	 * install SW breakpoints. Allow this (only) when explicitly requested
+@@ -95,12 +100,16 @@ static void __init map_kernel(u64 kaslr_offset, u64 va_offset, int root_level)
+ 	map_segment(init_pg_dir, &pgdp, va_offset, _data, _end, data_prot,
+ 		    true, root_level);
+ 	dsb(ishst);
++	GKIW_PI_MARK(11, 0x314b5032);
+ 
+ 	idmap_cpu_replace_ttbr1((phys_addr_t)init_pg_dir);
++	GKIW_PI_MARK(12, 0x314b5033);
+ 
+ 	if (twopass) {
+-		if (IS_ENABLED(CONFIG_RELOCATABLE))
++		if (IS_ENABLED(CONFIG_RELOCATABLE)) {
++			GKIW_PI_MARK(13, 0x314b5034);
+ 			relocate_kernel(kaslr_offset);
++		}
+ 
+ 		if (enable_scs) {
+ 			scs_patch(__eh_frame_start + va_offset,
+@@ -131,11 +140,13 @@ static void __init map_kernel(u64 kaslr_offset, u64 va_offset, int root_level)
+ 		map_segment(init_pg_dir, NULL, va_offset, __inittext_begin,
+ 			    __inittext_end, text_prot, false, root_level);
+ 	}
++	GKIW_PI_MARK(14, 0x314b5035);
+ 
+ 	/* Copy the root page table to its final location */
+ 	memcpy((void *)swapper_pg_dir + va_offset, init_pg_dir, PAGE_SIZE);
+ 	dsb(ishst);
+ 	idmap_cpu_replace_ttbr1((phys_addr_t)swapper_pg_dir);
++	GKIW_PI_MARK(15, 0x314b5036);
+ }
+ 
+ static void noinline __section(".idmap.text") set_ttbr0_for_lpa2(phys_addr_t ttbr)
+@@ -246,14 +257,24 @@ asmlinkage void __init early_map_kernel(u64 boot_status, phys_addr_t fdt)
+ 	int root_level = 4 - CONFIG_PGTABLE_LEVELS;
+ 	int va_bits = VA_BITS;
+ 	int chosen;
+-	void *fdt_mapped = map_fdt(fdt);
++	void *fdt_mapped;
++
++	GKIW_PI_MARK(0, 0x314d4b45);
++	GKIW_PI_MARK(8, (u32)(unsigned long)fdt);
++	fdt_mapped = map_fdt(fdt);
++	GKIW_PI_MARK(1, 0x31465446);
++	GKIW_PI_MARK(9, *(volatile unsigned char *)0x5df62000UL);
++	GKIW_PI_MARK(7, *(volatile unsigned char *)fdt_mapped);
+ 
+ 	/* Clear BSS and the initial page tables */
+ 	memset(__bss_start, 0, (char *)init_pg_end - (char *)__bss_start);
++	GKIW_PI_MARK(2, 0x31425353);
+ 
+ 	/* Parse the command line for CPU feature overrides */
+ 	chosen = fdt_path_offset(fdt_mapped, chosen_str);
++	GKIW_PI_MARK(3, 0x31464843);
+ 	init_feature_override(boot_status, fdt_mapped, chosen);
++	GKIW_PI_MARK(4, 0x314f5646);
+ 
+ 	if (IS_ENABLED(CONFIG_ARM64_64K_PAGES) && !cpu_has_lva()) {
+ 		va_bits = VA_BITS_MIN;
+@@ -285,5 +306,7 @@ asmlinkage void __init early_map_kernel(u64 boot_status, phys_addr_t fdt)
+ 		remap_idmap_for_lpa2();
+ 
+ 	va_base = KIMAGE_VADDR + kaslr_offset;
++	GKIW_PI_MARK(5, 0x314b4d50);
+ 	map_kernel(kaslr_offset, va_base - pa_base, root_level);
++	GKIW_PI_MARK(6, 0x314d4b32);
+ }
+diff --git a/arch/arm64/kernel/setup.c b/arch/arm64/kernel/setup.c
+index 23c05dc7a..313f26bd8 100644
+--- a/arch/arm64/kernel/setup.c
++++ b/arch/arm64/kernel/setup.c
+@@ -278,8 +278,13 @@ u64 cpu_logical_map(unsigned int cpu)
+ 	return __cpu_logical_map[cpu];
+ }
+ 
++extern void gkiw_mark(const char *s);
++extern void gkiw_mark_enable(void);
++extern void gkiw_early_linear(void);
++
+ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ {
++	gkiw_mark("setup_arch: enter");
+ 	setup_initial_init_mm(_text, _etext, _edata, _end);
+ 
+ 	*cmdline_p = boot_command_line;
+@@ -289,14 +294,18 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 	early_fixmap_init();
+ 	early_ioremap_init();
+ 
++	gkiw_mark("setup_arch: before setup_machine_fdt");
+ 	setup_machine_fdt(__fdt_pointer);
++	gkiw_mark("setup_arch: after setup_machine_fdt");
+ 
+ 	/*
+ 	 * Initialise the static keys early as they may be enabled by the
+ 	 * cpufeature code and early parameters.
+ 	 */
+ 	jump_label_init();
++	gkiw_mark("setup_arch: before parse_early_param");
+ 	parse_early_param();
++	gkiw_mark("setup_arch: after parse_early_param");
+ 
+ 	dynamic_scs_init();
+ 
+@@ -329,9 +338,13 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 			   FW_BUG "Booted with MMU enabled!");
+ 	}
+ 
++	gkiw_mark("setup_arch: before arm64_memblock_init");
+ 	arm64_memblock_init();
+-
++	gkiw_mark("setup_arch: before paging_init");
+ 	paging_init();
++	gkiw_mark_enable();
++	gkiw_early_linear();
++	gkiw_mark("setup_arch: after paging_init");
+ 
+ 	acpi_table_upgrade();
+ 
+@@ -349,15 +362,19 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 
+ 	early_ioremap_reset();
+ 
++	gkiw_mark("setup_arch: before psci_dt_init");
+ 	if (acpi_disabled)
+ 		psci_dt_init();
+ 	else
+ 		psci_acpi_init();
++	gkiw_mark("setup_arch: after psci_dt_init");
+ 
+ 	arm64_rsi_init();
+ 
+ 	init_bootcpu_ops();
++	gkiw_mark("setup_arch: before smp_init_cpus");
+ 	smp_init_cpus();
++	gkiw_mark("setup_arch: after smp_init_cpus");
+ 	smp_build_mpidr_hash();
+ 
+ #ifdef CONFIG_ARM64_SW_TTBR0_PAN
+@@ -369,6 +386,8 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 	init_task.thread_info.ttbr0 = phys_to_ttbr(__pa_symbol(reserved_pg_dir));
+ #endif
+ 
++	gkiw_mark("setup_arch: done");
++
+ 	if (boot_args[1] || boot_args[2] || boot_args[3]) {
+ 		pr_err("WARNING: x1-x3 nonzero in violation of boot protocol:\n"
+ 			"\tx1: %016llx\n\tx2: %016llx\n\tx3: %016llx\n"
+diff --git a/drivers/tty/serial/Makefile b/drivers/tty/serial/Makefile
+index a2ccbc508..f91e07a53 100644
+--- a/drivers/tty/serial/Makefile
++++ b/drivers/tty/serial/Makefile
+@@ -100,3 +100,5 @@ obj-$(CONFIG_SERIAL_MCTRL_GPIO)	+= serial_mctrl_gpio.o
+ 
+ obj-$(CONFIG_KGDB_SERIAL_CONSOLE) += kgdboc.o
+ obj-$(CONFIG_SERIAL_NUVOTON_MA35D1) += ma35d1_serial.o
++# gkiw memory earlycon (bringup)
++obj-y += gkiw_earlycon.o
+diff --git a/drivers/tty/serial/gkiw_earlycon.c b/drivers/tty/serial/gkiw_earlycon.c
+new file mode 100644
+index 000000000..fa4132094
+--- /dev/null
++++ b/drivers/tty/serial/gkiw_earlycon.c
+@@ -0,0 +1,64 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * gki_world memory earlycon.
++ *
++ * On a blind bringup board the UART may not be wired to the host.  Keep the
++ * early console output in a static RAM buffer inside the kernel image, which
++ * the next second-stage boot uploads over fastboot.  The buffer is part of
++ * the kernel BSS: it is mapped from the first instruction, reserved from the
++ * allocator, and survives a warm reset.
++ *
++ * This is a development aid, not a production console.
++ */
++
++#include <linux/console.h>
++#include <linux/init.h>
++#include <linux/kernel.h>
++#include <linux/serial_core.h>
++#include <linux/string.h>
++
++#define GKIW_EARLY_MAGIC	0x474b5731	/* "GKW1" */
++
++struct gkiw_early_hdr {
++	u32 magic;
++	u32 len;
++	char data[];
++};
++
++static char gkiw_early_buf[256 * 1024] __aligned(4096);
++static struct gkiw_early_hdr *gkiw_early;
++
++static void gkiw_early_write(struct console *con, const char *s, unsigned int n)
++{
++	unsigned int room;
++
++	if (!gkiw_early)
++		return;
++
++	room = sizeof(gkiw_early_buf) - sizeof(*gkiw_early) -
++	       gkiw_early->len - 1;
++	if (n > room)
++		n = room;
++	for (unsigned int i = 0; i < n; i++)
++		gkiw_early->data[gkiw_early->len + i] = s[i];
++	gkiw_early->len += n;
++	gkiw_early->data[gkiw_early->len] = '\0';
++}
++
++static int __init gkiw_early_setup(struct earlycon_device *device,
++				   const char *opt)
++{
++	gkiw_early = (struct gkiw_early_hdr *)gkiw_early_buf;
++	gkiw_early->magic = GKIW_EARLY_MAGIC;
++	gkiw_early->len = 0;
++	gkiw_early->data[0] = '\0';
++
++	device->con->write = gkiw_early_write;
++	return 0;
++}
++EARLYCON_DECLARE(gkiw, gkiw_early_setup);
++
++/* Kept for the bringup hooks; the buffer is always available now. */
++void gkiw_early_linear(void)
++{
++}
+diff --git a/init/main.c b/init/main.c
+index 6985bf93b..2d5e6befe 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -867,11 +867,14 @@ static void __init early_numa_node_init(void)
+ }
+ 
+ asmlinkage __visible __init __no_sanitize_address __noreturn __no_stack_protector
++extern void gkiw_mark(const char *s);
++
+ void start_kernel(void)
+ {
+ 	char *command_line;
+ 	char *after_dashes;
+ 
++	gkiw_mark("start_kernel: enter");
+ 	set_task_stack_end_magic(&init_task);
+ 	smp_setup_processor_id();
+ 	debug_objects_early_init();
+@@ -889,7 +892,9 @@ void start_kernel(void)
+ 	boot_cpu_init();
+ 	page_address_init();
+ 	pr_notice("%s", linux_banner);
++	gkiw_mark("start_kernel: before setup_arch");
+ 	setup_arch(&command_line);
++	gkiw_mark("start_kernel: after setup_arch");
+ 	/* Static keys and static calls are needed by LSMs */
+ 	jump_label_init();
+ 	static_call_init();
+@@ -972,8 +977,10 @@ void start_kernel(void)
+ 
+ 	context_tracking_init();
+ 	/* init some links before init_ISA_irqs() */
++	gkiw_mark("start_kernel: before init_IRQ");
+ 	early_irq_init();
+ 	init_IRQ();
++	gkiw_mark("start_kernel: after init_IRQ");
+ 	tick_init();
+ 	rcu_init_nohz();
+ 	timers_init();
+@@ -1005,7 +1012,9 @@ void start_kernel(void)
+ 	 * we've done PCI setups etc, and console_init() must be aware of
+ 	 * this. But we do want output early, in case something goes wrong.
+ 	 */
++	gkiw_mark("start_kernel: before console_init");
+ 	console_init();
++	gkiw_mark("start_kernel: after console_init");
+ 	if (panic_later)
+ 		panic("Too many boot %s vars at `%s'", panic_later,
+ 		      panic_param);
+@@ -1068,6 +1077,7 @@ void start_kernel(void)
+ 	kcsan_init();
+ 
+ 	/* Do the rest non-__init'ed, we're now alive */
++	gkiw_mark("start_kernel: before rest_init");
+ 	rest_init();
+ 
+ 	/*

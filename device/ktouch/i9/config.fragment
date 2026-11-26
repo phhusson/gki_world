@@ -22,3 +22,19 @@ CONFIG_PANIC_TIMEOUT=10
 # The 2ndstage watchdog is the recovery path until the USB ACM shell works.
 # Do not let Linux take over the MTK TOPRGU yet.
 # CONFIG_MEDIATEK_WATCHDOG is not set
+
+# Bringup boot path
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+CONFIG_BLK_DEV_INITRD=y
+CONFIG_RD_GZIP=y
+CONFIG_ARM_PSCI_FW=y
+CONFIG_SMP=y
+
+# The Cortex-A53 has a 48-bit VA and no LVA.  Keep the early boot path simple
+# while the PI page-table code is being debugged.
+CONFIG_EXPERT=y
+CONFIG_ARM64_VA_BITS_48=y
+# CONFIG_ARM64_VA_BITS_52 is not set
+# CONFIG_RELOCATABLE is not set
+# CONFIG_RANDOMIZE_BASE is not set

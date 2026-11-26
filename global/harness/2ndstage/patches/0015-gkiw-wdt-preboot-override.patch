@@ -1,0 +1,40 @@
+diff --git a/cmd/gkiw.c b/cmd/gkiw.c
+index 56071d89..6aafa2fc0 100644
+--- a/cmd/gkiw.c
++++ b/cmd/gkiw.c
+@@ -10,6 +10,7 @@
+ #include <console.h>
+ #include <cpu_func.h>
+ #include <dm.h>
++#include <env.h>
+ #include <gkiw.h>
+ #include <linux/string.h>
+ #include <linux/stringify.h>
+@@ -271,12 +272,25 @@ static int gkiw_wdt_disarm(void)
+  */
+ void fastboot_preboot(void)
+ {
+-	int ret = gkiw_wdt_arm(GKIW_WDT_DEFAULT_MS);
++	const char *override = env_get("gkiw_wdt_preboot");
++	u64 timeout_ms = GKIW_WDT_DEFAULT_MS;
++	int ret;
++
++	if (override) {
++		if (!strcmp(override, "off")) {
++			ret = gkiw_wdt_disarm();
++			printf("gkiw: watchdog left off for this boot\n");
++			return;
++		}
++		timeout_ms = hextoul(override, NULL);
++	}
++
++	ret = gkiw_wdt_arm(timeout_ms);
+ 
+ 	if (ret)
+ 		printf("gkiw: cannot arm watchdog (%d)\n", ret);
+ 	else
+-		printf("gkiw: watchdog armed for %d ms\n", GKIW_WDT_DEFAULT_MS);
++		printf("gkiw: watchdog armed for %lld ms\n", timeout_ms);
+ }
+ 
+ static int gkiw_do_pstore(int argc, char *const argv[])

@@ -1,0 +1,74 @@
+diff --git a/board/mediatek/mt6739/board.c b/board/mediatek/mt6739/board.c
+index cbfc4387..901c6fef 100644
+--- a/board/mediatek/mt6739/board.c
++++ b/board/mediatek/mt6739/board.c
+@@ -11,11 +11,13 @@
+ #include <config.h>
+ #include <console.h>
+ #include <dm.h>
++#include <command.h>
+ #include <env.h>
+ #include <fastboot.h>
+ #include <linux/libfdt.h>
+ #include <init.h>
+ #include <log.h>
++#include <vsprintf.h>
+ #include <usb.h>
+ #include <wdt.h>
+ #include <asm/global_data.h>
+@@ -225,6 +227,55 @@ static const char *gkiw_devinfo_serial(void)
+ 	return pos ? serial : NULL;
+ }
+ 
++/*
++ * OEM hook for the development loop.  "fastboot oem gkiw ..." runs a
++ * second-stage command and, for the watchdog, remembers the requested
++ * timeout for the upcoming fastboot_preboot().
++ */
++void fastboot_oem_board(char *cmd_parameter, void *data, u32 size,
++			char *response)
++{
++	const char *arg;
++
++	if (!cmd_parameter || strncmp(cmd_parameter, "gkiw ", 5)) {
++		fastboot_fail("unsupported oem command", response);
++		return;
++	}
++
++	arg = cmd_parameter + 5;
++	if (!strcmp(arg, "watchdog off")) {
++		env_set("gkiw_wdt_preboot", "off");
++		if (run_command("gkiw watchdog off", 0)) {
++			fastboot_fail("watchdog off failed", response);
++			return;
++		}
++		fastboot_okay(NULL, response);
++		return;
++	}
++
++	if (!strncmp(arg, "watchdog ", 9)) {
++		char cmd[64];
++		const char *ms = arg + 9;
++		char *end;
++
++		hextoul(ms, &end);
++		if (*end) {
++			fastboot_fail("bad watchdog timeout", response);
++			return;
++		}
++		snprintf(cmd, sizeof(cmd), "gkiw watchdog %s", ms);
++		if (run_command(cmd, 0)) {
++			fastboot_fail("watchdog arm failed", response);
++			return;
++		}
++		env_set("gkiw_wdt_preboot", ms);
++		fastboot_okay(NULL, response);
++		return;
++	}
++
++	fastboot_fail("unsupported oem gkiw command", response);
++}
++
+ int board_init(void)
+ {
+ 	/* Address of the ATAG/boot parameters block passed to Linux. */
