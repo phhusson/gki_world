@@ -5,8 +5,9 @@
 #
 #   scripts/build.sh [--soc <2ndstage.conf>] [--src <dir>] [--build <dir>]
 #
-# The result is <build>/u-boot.bin. The source tree is managed: it is reset to
-# the pinned U-Boot commit and the patches are applied on every run.
+# The result is <build>/<UBOOT_PAYLOAD> and the wrapped boot image.  The source
+# tree is managed: it is reset to the pinned U-Boot commit and the patches are
+# applied on every run.
 
 set -eu
 
@@ -28,7 +29,7 @@ while [ $# -gt 0 ]; do
 		shift 2
 		;;
 	-h|--help)
-		sed -n '2,9p' "$0"
+		sed -n '2,10p' "$0"
 		exit 0
 		;;
 	*)
@@ -38,13 +39,26 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
+# A relative --soc path is relative to the repository root, not to wherever
+# the script was invoked from.
+case "$TARGET_CONF" in
+/*) ;;
+*) TARGET_CONF=$ROOT/$TARGET_CONF ;;
+esac
+[ -f "$TARGET_CONF" ] || {
+	echo "missing target config: $TARGET_CONF" >&2
+	exit 1
+}
+
 . "$ROOT/global/harness/2ndstage/uboot.conf"
 . "$TARGET_CONF"
 
 UBOOT_SRC=${UBOOT_SRC:-$ROOT/.bootloader/u-boot}
-BUILD=${BUILD:-$ROOT/.bootloader/build-${UBOOT_PLATFORM:-g12a}}
+BUILD=${BUILD:-$ROOT/.bootloader/build-${UBOOT_PLATFORM:-${GKIW_BUILD_NAME:-g12a}}}
 JOBS=${JOBS:-$(nproc)}
 CROSS_COMPILE=${CROSS_COMPILE:-aarch64-linux-gnu-}
+UBOOT_PAYLOAD=${UBOOT_PAYLOAD:-u-boot-dtb.bin}
+GKIW_FLASH_IMAGE=${GKIW_FLASH_IMAGE:-gkiw-2ndstage-flash.img}
 
 if [ ! -d "$UBOOT_SRC/.git" ]; then
 	mkdir -p "$UBOOT_SRC"
@@ -88,30 +102,66 @@ while IFS= read -r patch; do
 	git -C "$UBOOT_SRC" apply "$patch"
 done < "$PATCH_SORTED"
 
+# Legacy compatibility for layers written before UBOOT_PATCH_DIRS.  These
+# patches are applied after the sorted union rather than merged into it, so a
+# series numbered 0001.. still follows the global 0001.. series.
+if [ -n "${UBOOT_SOC_PATCH_DIR:-}" ]; then
+	for patch in "$ROOT/$UBOOT_SOC_PATCH_DIR"/*.patch; do
+		[ -e "$patch" ] || continue
+		echo "applying $(basename "$patch")"
+		git -C "$UBOOT_SRC" apply "$patch"
+	done
+fi
+
 mkdir -p "$BUILD"
 make -C "$UBOOT_SRC" O="$BUILD" "$UBOOT_BASE_DEFCONFIG"
-"$UBOOT_SRC/scripts/kconfig/merge_config.sh" -m -O "$BUILD" \
-	"$BUILD/.config" "$ROOT/$UBOOT_FRAGMENT"
+
+# A target may name upstream fragments that must be merged before its own, for
+# example board/qualcomm/qcom-phone.config.  Resolve them against the
+# repository first and then the U-Boot tree.
+set -- "$BUILD/.config"
+if [ -n "${UBOOT_EXTRA_FRAGMENTS:-}" ]; then
+	for fragment in $UBOOT_EXTRA_FRAGMENTS; do
+		case "$fragment" in
+		/*) ;;
+		*)
+			if [ -f "$ROOT/$fragment" ]; then
+				fragment=$ROOT/$fragment
+			else
+				fragment=$UBOOT_SRC/$fragment
+			fi
+			;;
+		esac
+		set -- "$@" "$fragment"
+	done
+fi
+set -- "$@" "$ROOT/$UBOOT_FRAGMENT"
+"$UBOOT_SRC/scripts/kconfig/merge_config.sh" -m -O "$BUILD" "$@"
 make -C "$UBOOT_SRC" O="$BUILD" olddefconfig
 make -C "$UBOOT_SRC" O="$BUILD" -j"$JOBS" CROSS_COMPILE="$CROSS_COMPILE"
 
 GKIW_BOOTIMG_BASE="$GKIW_BOOTIMG_BASE" \
 GKIW_BOOTIMG_HEADER_SIZE="$GKIW_BOOTIMG_HEADER_SIZE" \
 GKIW_BOOTIMG_PAGESIZE="$GKIW_BOOTIMG_PAGESIZE" \
+GKIW_BOOTIMG_HEADER_VERSION="${GKIW_BOOTIMG_HEADER_VERSION:-0}" \
 GKIW_BOOTIMG_KERNEL_OFFSET="${GKIW_BOOTIMG_KERNEL_OFFSET:-0x0}" \
 GKIW_BOOTIMG_RAMDISK_OFFSET="${GKIW_BOOTIMG_RAMDISK_OFFSET:-}" \
 GKIW_BOOTIMG_SECOND_OFFSET="${GKIW_BOOTIMG_SECOND_OFFSET:-}" \
 GKIW_BOOTIMG_TAGS_OFFSET="${GKIW_BOOTIMG_TAGS_OFFSET:-}" \
 GKIW_BOOTIMG_CMDLINE="${GKIW_BOOTIMG_CMDLINE:-}" \
+GKIW_BOOTIMG_OS_VERSION="${GKIW_BOOTIMG_OS_VERSION:-}" \
+GKIW_BOOTIMG_OS_PATCH_LEVEL="${GKIW_BOOTIMG_OS_PATCH_LEVEL:-}" \
 GKIW_BOOTIMG_COMPRESS="${GKIW_BOOTIMG_COMPRESS:-none}" \
 GKIW_BOOTIMG_DUMMY_RAMDISK="${GKIW_BOOTIMG_DUMMY_RAMDISK:-0}" \
 GKIW_BOOTIMG_DUMMY_RAMDISK_SIZE="${GKIW_BOOTIMG_DUMMY_RAMDISK_SIZE:-0}" \
 GKIW_BOOTIMG_KERNEL_PAD_SIZE="${GKIW_BOOTIMG_KERNEL_PAD_SIZE:-0}" \
+GKIW_BOOTIMG_IMAGE_PAD_SIZE="${GKIW_BOOTIMG_IMAGE_PAD_SIZE:-0}" \
 GKIW_BOOTIMG_RAMDISK="${GKIW_BOOTIMG_RAMDISK:-}" \
 GKIW_BOOTIMG_APPEND_DTB="${GKIW_BOOTIMG_APPEND_DTB:-0}" \
+GKIW_BOOTIMG_TRAILER="${GKIW_BOOTIMG_TRAILER:-}" \
 "$ROOT/global/harness/2ndstage/scripts/mkbootimg.sh" \
-	"$BUILD/u-boot-dtb.bin" "$BUILD/gkiw-2ndstage-flash.img" \
+	"$BUILD/$UBOOT_PAYLOAD" "$BUILD/$GKIW_FLASH_IMAGE" \
 	"${GKIW_BOOTIMG_DTB:-$BUILD/u-boot.dtb}"
 
 rm -f "$BUILD/gkiw-2ndstage-boot.img" "$BUILD/gkiw-2ndstage-selfboot.img" "$BUILD/gkiw-2ndstage-fastboot.img"
-echo "built: $BUILD/u-boot.bin"
+echo "built: $BUILD/$UBOOT_PAYLOAD"

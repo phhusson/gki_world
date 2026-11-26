@@ -1,0 +1,356 @@
+From 1ca5448170897fa7ed6a3c59974b720439e72592 Mon Sep 17 00:00:00 2001
+From: Pierre-Hugues Husson <phh@phh.me>
+Date: Thu, 26 Nov 2026 19:06:16 +0100
+Subject: [PATCH 3/3] board: qualcomm: add the F(x)tec Pro1 dev second stage
+
+Add the board data for the MSM8998 F(x)tec Pro1 (QX1000).  The shared
+MSM8998 DTS already describes the phone, so the U-Boot overlay only
+needs the pieces the harness uses:
+
+  - the ABL framebuffer at 0x9d600000, 1080x2160, without clock or
+    power-domain phandles;
+  - the BLSP2 UART at 19.2 MHz, because the GCC is a stub;
+  - USB2 peripheral only, dropping the USB3 PHY that has no driver;
+  - a 128 KiB 2ndstage log at 0xffd00000, after the 1 MiB ramoops at
+    0xffc00000;
+  - storage, PCIe, WiFi, Bluetooth and touch disabled.
+
+The USB glue node's GCC power-domain and reset references are removed:
+the GCC is a clock stub, so those providers do not exist and the DWC3
+wrapper aborts when the reset lookup fails.  ABL leaves the controller
+powered and out of reset.
+
+The board file pins the fastboot buffer at 0xa0000000 below 4 GiB and
+reserves it in LMB.  It also stops U-Boot below the reserved windows so
+the previous boot's pstore and its own log survive, and makes
+LMB_LIMIT_DMA_BELOW_RAM_TOP default for Snapdragon so bootm keeps the
+kernel below the same line.
+
+Nothing here has been run on a Pro1.
+---
+ arch/arm/dts/msm8998-fxtec-pro1-u-boot.dtsi  | 126 +++++++++++++++++
+ board/qualcomm/gkiw-msm8998/Makefile         |   2 +
+ board/qualcomm/gkiw-msm8998/gkiw-msm8998.c   | 141 +++++++++++++++++++
+ board/qualcomm/gkiw-msm8998/gkiw-msm8998.env |   9 ++
+ lib/Kconfig                                  |   2 +-
+ 5 files changed, 279 insertions(+), 1 deletion(-)
+ create mode 100644 arch/arm/dts/msm8998-fxtec-pro1-u-boot.dtsi
+ create mode 100644 board/qualcomm/gkiw-msm8998/Makefile
+ create mode 100644 board/qualcomm/gkiw-msm8998/gkiw-msm8998.c
+ create mode 100644 board/qualcomm/gkiw-msm8998/gkiw-msm8998.env
+
+diff --git a/arch/arm/dts/msm8998-fxtec-pro1-u-boot.dtsi b/arch/arm/dts/msm8998-fxtec-pro1-u-boot.dtsi
+new file mode 100644
+index 00000000..556884c6
+--- /dev/null
++++ b/arch/arm/dts/msm8998-fxtec-pro1-u-boot.dtsi
+@@ -0,0 +1,126 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * U-Boot-only additions for the F(x)tec Pro1 dev second stage.
++ *
++ * The shared MSM8998 tree describes a full Linux phone.  This loader only
++ * needs the debug UART, USB2 peripheral mode, the ABL framebuffer and the
++ * regions shared with the kernel.  Heavy peripherals are disabled so their
++ * drivers do not probe before the console exists.
++ */
++
++/ {
++	/*
++	 * ABL reads this when it picks the DTB.  The stock Pro1 DTB carries
++	 * the v2.0 value; the Linux tree copied here says 0.
++	 */
++	qcom,msm-id = <0x124 0x20000>;
++
++	chosen {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/*
++		 * The framebuffer ABL leaves behind.  The stock DTB calls the
++		 * region splash_region@9d600000, 1080x2160 portrait.  No clock
++		 * or power-domain phandles here: ABL already turned the display
++		 * on, and U-Boot has no MSM8998 display clock driver.
++		 */
++		framebuffer0: framebuffer@9d600000 {
++			compatible = "simple-framebuffer";
++			reg = <0x0 0x9d600000 0x0 0x2400000>;
++			width = <1080>;
++			height = <2160>;
++			stride = <(1080 * 4)>;
++			format = "a8r8g8b8";
++		};
++	};
++
++	reserved-memory {
++		/*
++		 * Persistent 2ndstage console log.  It follows ramoops at
++		 * 0xffc00000 and must be reserved in the Linux DT as well.
++		 */
++		gkiw_log: gkiw-log@ffd00000 {
++			reg = <0x0 0xffd00000 0x0 0x20000>;
++			no-map;
++		};
++	};
++};
++
++/*
++ * ABL leaves the BLSP2 UART at the usual 19.2 MHz.  U-Boot has no MSM8998
++ * GCC clock driver, so the clock node is a stub; this property is what the
++ * serial driver uses to compute the divider.
++ */
++&blsp2_uart1 {
++	clock-frequency = <19200000>;
++};
++
++/*
++ * USB2 only.  The QMP USB3 PHY has no U-Boot driver, and the DWC3 node would
++ * otherwise try to get it as a second PHY.  qcom,select-utmi-as-pipe-clk is
++ * the same choice the OnePlus MSM8998 trees make for a USB2-only port.
++ */
++&usb3 {
++	/*
++	 * The GCC node is a clock stub, not a power-domain or reset
++	 * provider.  ABL leaves the controller powered and out of reset, and
++	 * the wrapper treats a missing reset as a hard probe failure, so drop
++	 * both properties rather than aborting USB probe.
++	 */
++	/delete-property/ power-domains;
++	/delete-property/ resets;
++	qcom,select-utmi-as-pipe-clk;
++};
++
++&usb3_dwc3 {
++	phys = <&qusb2phy>;
++	phy-names = "usb2-phy";
++	maximum-speed = "high-speed";
++	dr_mode = "peripheral";
++};
++
++&usb3phy {
++	status = "disabled";
++};
++
++&qusb2phy {
++	/* Same missing GCC reset provider; the driver tolerates it, but do
++	 * not ask for it at all. */
++	/delete-property/ resets;
++	status = "okay";
++};
++
++/* No storage or PCIe in the dev second stage. */
++&ufshc {
++	status = "disabled";
++};
++
++&ufsphy {
++	status = "disabled";
++};
++
++&sdhc2 {
++	status = "disabled";
++};
++
++&pcie0 {
++	status = "disabled";
++};
++
++&pcie_phy {
++	status = "disabled";
++};
++
++&wifi {
++	status = "disabled";
++};
++
++&blsp1_uart3 {
++	status = "disabled";
++};
++
++&blsp2_i2c1 {
++	status = "disabled";
++};
+diff --git a/board/qualcomm/gkiw-msm8998/Makefile b/board/qualcomm/gkiw-msm8998/Makefile
+new file mode 100644
+index 00000000..1a777224
+--- /dev/null
++++ b/board/qualcomm/gkiw-msm8998/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0+
++obj-y += gkiw-msm8998.o
+diff --git a/board/qualcomm/gkiw-msm8998/gkiw-msm8998.c b/board/qualcomm/gkiw-msm8998/gkiw-msm8998.c
+new file mode 100644
+index 00000000..0e6ddbf5
+--- /dev/null
++++ b/board/qualcomm/gkiw-msm8998/gkiw-msm8998.c
+@@ -0,0 +1,141 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * gki_world development second stage for the F(x)tec Pro1 (MSM8998).
++ *
++ * The generic Snapdragon board code already sets up the memory map from the
++ * DTB that ABL patched and allocates the usual run-time addresses.  This file
++ * only pins the pieces the harness depends on: a fastboot buffer below 4 GiB,
++ * and a relocation ceiling below the pstore and 2nd-stage log windows.
++ */
++
++#include <asm/io.h>
++#include <env.h>
++#include <fastboot.h>
++#include <fdtdec.h>
++#include <init.h>
++#include <linux/libfdt.h>
++#include <linux/sizes.h>
++#include <lmb.h>
++#include <log.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++/*
++ * MSM8998 IMEM restart reason: msm-imem@146bf000 + restart_reason@65c.
++ * ABL reads and clears this on the next boot; 0x77665500 is the value the
++ * stock Android kernel writes for "reboot bootloader".
++ */
++#define QCOM_IMEM_RESTART_REASON	0x146bf65c
++#define QCOM_RESTART_BOOTLOADER		0x77665500
++#define QCOM_RESTART_RECOVERY		0x77665502
++
++/* How many times the ceiling may be lowered before the tree is wrong. */
++#define GKIW_RESERVED_PASSES	8
++
++/*
++ * The highest address this loader may end on, given how much room it needs.
++ *
++ * The generic Snapdragon board leaves U-Boot at the top of DRAM.  On a phone
++ * with 6 GiB that is far above 4 GiB, and the loader would also erase the
++ * ramoops buffer and this loader's own log on the way.  Walk the reserved
++ * windows and stop below any that the loader would otherwise reach.  Pulling
++ * the stop down can uncover another window, hence the loop.
++ */
++static phys_addr_t gkiw_ram_top_below_reserved(phys_addr_t top,
++					       phys_size_t needed)
++{
++	const void *fdt = gd->fdt_blob;
++	int parent, node, pass;
++
++	if (!fdt)
++		return top;
++
++	parent = fdt_path_offset(fdt, "/reserved-memory");
++	if (parent < 0)
++		return top;
++
++	for (pass = 0; pass < GKIW_RESERVED_PASSES; pass++) {
++		phys_addr_t was = top;
++
++		fdt_for_each_subnode(node, fdt, parent) {
++			fdt_size_t size;
++			fdt_addr_t start;
++
++			start = fdtdec_get_addr_size_auto_parent(fdt, parent,
++								 node, "reg", 0,
++								 &size, false);
++			if (start == FDT_ADDR_T_NONE || !size)
++				continue;
++
++			if (start < top && start + size > top - needed)
++				top = start;
++		}
++
++		if (top == was)
++			break;
++	}
++
++	return top;
++}
++
++phys_addr_t board_get_usable_ram_top(phys_size_t total_size)
++{
++	/*
++	 * Stop below the reserved windows and below 4 GiB.  The fastboot
++	 * buffer at 0xa0000000 is well below both; the pstore at 0xffc00000
++	 * and the 2nd-stage log at 0xffd00000 stay above the loader.
++	 */
++	return gkiw_ram_top_below_reserved(SZ_4G, total_size +
++					   CONFIG_SYS_MALLOC_LEN + SZ_32M);
++}
++
++void qcom_late_init(void)
++{
++#if CONFIG_IS_ENABLED(FASTBOOT)
++	phys_addr_t addr = CONFIG_FASTBOOT_BUF_ADDR;
++
++	/*
++	 * A fixed buffer below 4 GiB.  The DWC3 controller on this SoC cannot
++	 * address memory above that line, and the generic runtime allocation
++	 * would put it at the top of the 6 GiB bank.  Reserve it in LMB too,
++	 * or bootm could hand the downloaded image's memory to the kernel.
++	 */
++	if (lmb_alloc_mem(LMB_MEM_ALLOC_ADDR, 0, &addr,
++			  CONFIG_FASTBOOT_BUF_SIZE, LMB_NONE)) {
++		log_err("%s: cannot reserve fastboot buffer\n", __func__);
++		return;
++	}
++
++	env_set_hex("fastboot_addr_r", addr);
++	env_set_hex("loadaddr", addr);
++#endif
++}
++
++/*
++ * Ask ABL for its own fastboot instead of letting a plain reset return to
++ * the flashed boot image.  There is no BCB or UFS access in this loader, but
++ * MSM8998 exposes the same restart reason the stock kernel uses.
++ */
++int fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
++{
++	void __iomem *restart_reason = (void __iomem *)QCOM_IMEM_RESTART_REASON;
++	u32 value;
++
++	switch (reason) {
++	case FASTBOOT_REBOOT_REASON_BOOTLOADER:
++	case FASTBOOT_REBOOT_REASON_FASTBOOTD:
++		value = QCOM_RESTART_BOOTLOADER;
++		break;
++	case FASTBOOT_REBOOT_REASON_RECOVERY:
++		value = QCOM_RESTART_RECOVERY;
++		break;
++	default:
++		return 0;
++	}
++
++	writel(value, restart_reason);
++	/* Make sure the store has completed before the reset. */
++	readl(restart_reason);
++
++	return 0;
++}
+diff --git a/board/qualcomm/gkiw-msm8998/gkiw-msm8998.env b/board/qualcomm/gkiw-msm8998/gkiw-msm8998.env
+new file mode 100644
+index 00000000..8e56bdf2
+--- /dev/null
++++ b/board/qualcomm/gkiw-msm8998/gkiw-msm8998.env
+@@ -0,0 +1,9 @@
++stdin=serial
++stdout=serial,vidconsole
++stderr=serial,vidconsole
++
++bootdelay=1
++bootretry=-1
++bootcmd=fastboot usb 0
++
++fastbootcmd=echo "Fastboot Mode"; fastboot usb 0
+diff --git a/lib/Kconfig b/lib/Kconfig
+index e8654898..6f8f1f08 100644
+--- a/lib/Kconfig
++++ b/lib/Kconfig
+@@ -1394,7 +1394,7 @@ config LMB_LIMIT_DMA_BELOW_RAM_TOP
+ 	bool
+ 	depends on LMB
+ 	default y if ARCH_BCM283X || ARCH_EXYNOS9 || ARCH_MVEBU || \
+-		     ARCH_ROCKCHIP || STARFIVE_JH7110
++		     ARCH_ROCKCHIP || ARCH_SNAPDRAGON || STARFIVE_JH7110
+ 	default y if SANDBOX
+ 	help
+ 	  Some architectures can not DMA above ram_top boundary,

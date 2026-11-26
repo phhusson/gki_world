@@ -1,0 +1,35 @@
+# Data for the shared boot image tool (global/tools, planned).
+#
+# Measured from the stock QX1000 boot image (Android 9, build
+# PKQ1.190723.001) on dumps.tadiphone.dev.  The Pro1 uses the same layout
+# for the Linux kernel and for the gki_world second stage.
+
+format: android-boot-v1
+pagesize: 4096
+cmdline: >-
+  console=ttyMSM0,115200,n8 androidboot.console=ttyMSM0
+  earlycon=msm_serial_dm,0xc1b0000 androidboot.hardware=qcom
+compression: gzip
+append_dtb: true
+qcdt: false
+avb: unknown
+
+template:
+  dump: dumps.tadiphone.dev/dumps/fxtec/qx1000
+  build: QX1000-user-9-PKQ1.190723.001-20200825231443-release-keys
+  sha256: null
+
+qcom:
+  base: 0x00000000
+  kernel_offset: 0x00008000
+  ramdisk_offset: 0x01000000
+  second_offset: 0x00f00000
+  tags_offset: 0x00000100
+  os_version: 9.0.0
+  os_patch_level: 2020-04
+
+secondstage:
+  note: >-
+    ABL loads a gzipped u-boot-nodtb.bin with u-boot.dtb appended, exactly
+    like a Linux Image.gz-dtb.  The first stage is the phone's own ABL;
+    there is no lk2nd stage for MSM8998.

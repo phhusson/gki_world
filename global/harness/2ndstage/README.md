@@ -316,6 +316,38 @@ OpenSSL 4 removed the ENGINE API those tools still use.
 The source tree (`.bootloader/u-boot`) is managed: every run resets it to
 `uboot.conf`'s pinned commit and reapplies the patches.
 
+### SoC data and packaging
+
+A SoC harness config can add to the shared build:
+
+| Variable | Meaning |
+|----------|---------|
+| `UBOOT_PATCH_DIRS` | extra patch directories, sorted with global by basename |
+| `UBOOT_EXTRA_FRAGMENTS` | upstream fragments merged before the target fragment |
+| `UBOOT_PAYLOAD` | `u-boot-dtb.bin` (default), `u-boot.bin` or `u-boot-nodtb.bin` |
+| `UBOOT_PLATFORM` | default build directory suffix |
+| `GKIW_FLASH_IMAGE` | name of the wrapped boot image |
+| `GKIW_BOOTIMG_*` | header version, offsets, OS version, trailer and padding |
+
+`UBOOT_EXTRA_FRAGMENTS` is resolved against the repository first and then
+against the U-Boot source tree, so a phone can reuse an upstream fragment such
+as `board/qualcomm/qcom-phone.config`.
+
+`GKIW_BOOTIMG_COMPRESS=gzip` compresses the payload before wrapping.
+`GKIW_BOOTIMG_APPEND_DTB=1` appends a DTB after the kernel; `build.sh` passes
+`u-boot.dtb` by default, or `GKIW_BOOTIMG_DTB=<path>` if the first stage needs
+a different device tree.  `GKIW_BOOTIMG_IMAGE_PAD_SIZE` pads the finished boot
+image to the partition size, which is how the Qualcomm layer overwrites a
+stale stock AVB footer.
+
+`scripts/mkbootimg.sh` defaults to the Amlogic layout: a 4 KiB ARM64 Image
+header in front of `u-boot-dtb.bin`, Android header v0 and no trailer.  Setting
+`GKIW_BOOTIMG_HEADER_SIZE=0` uses the payload as-is; a first stage that loads a
+raw `u-boot.bin` or a gzipped `u-boot-nodtb.bin` selects that.  Header v1,
+the stock offsets and a trailer such as `SEANDROIDENFORCE` are just data in the
+target config.  The MediaTek i9 and Qualcomm Pro1 layers are examples; see
+their harness READMEs.
+
 ### Boot image
 
 The image must satisfy the **stock first stage**, not a generic SoC datasheet.

@@ -1,0 +1,9 @@
+schema: 1
+kind: device
+id: device/fxtec/pro1
+description: F(x)tec Pro1 (QX1000, MSM8998)
+requires:
+  - soc/qcom/msm8998
+maintainers:
+  - "@phhusson"
+status: wip

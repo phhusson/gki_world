@@ -1,0 +1,24 @@
+schema: 1
+license: GPL-2.0-or-later
+sources:
+  - kind: other
+    path: soc/qcom/msm8998/harness/patches
+    derived:
+      - 0101-clk-qcom-msm8998-stub-gcc.patch
+    note: >-
+      Original gki_world work for the MSM8998 dev second stage.  The SoC device
+      trees themselves come from dts/upstream at the pinned U-Boot commit; this
+      patch adds only the stub GCC binding needed by the harness.
+  - kind: other
+    url: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+    tag: v6.18
+    license: GPL-2.0-only
+    derived:
+      - 0102-phy-qcom-msm8998-qusb2.patch
+    note: >-
+      MSM8998 QUSB2 register layout, init table and PHY config are taken from
+      drivers/phy/qualcomm/phy-qcom-qusb2.c.  The optional-reset and PLL
+      override handling is adapted to U-Boot's smaller driver.
+notes: >-
+  The patches apply after the global gkiw patches to the pinned U-Boot commit
+  in global/harness/2ndstage/uboot.conf.

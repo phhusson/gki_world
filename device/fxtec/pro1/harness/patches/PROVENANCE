@@ -1,0 +1,14 @@
+schema: 1
+license: GPL-2.0-or-later
+sources:
+  - kind: other
+    path: device/fxtec/pro1/harness/patches
+    derived:
+      - 0104-board-qualcomm-gkiw-msm8998.patch
+    note: >-
+      Original gki_world board data for the F(x)tec Pro1.  The MSM8998 SoC tree
+      and msm8998-fxtec-pro1.dts come from dts/upstream at the pinned U-Boot
+      commit; this patch adds the U-Boot overlay, board hooks and env.
+notes: >-
+  The patch applies after the global and MSM8998 SoC patches to the pinned
+  U-Boot commit in global/harness/2ndstage/uboot.conf.
