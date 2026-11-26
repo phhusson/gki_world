@@ -73,7 +73,7 @@ index 000000000..d50157d97
 +	gkiw_marks->data[gkiw_marks->len] = '\0';
 +}
 diff --git a/arch/arm64/kernel/head.S b/arch/arm64/kernel/head.S
-index ca04b338c..adcfba3c0 100644
+index ca04b338c..94f23278c 100644
 --- a/arch/arm64/kernel/head.S
 +++ b/arch/arm64/kernel/head.S
 @@ -83,6 +83,11 @@
@@ -110,7 +110,39 @@ index ca04b338c..adcfba3c0 100644
  	b	__primary_switch
  SYM_CODE_END(primary_entry)
  
-@@ -506,10 +519,21 @@ SYM_FUNC_START_LOCAL(__no_granule_support)
+@@ -456,18 +469,31 @@ SYM_FUNC_END(set_cpu_boot_mode_flag)
+  * If it isn't, park the CPU
+  */
+ 	.section ".idmap.text","a"
++
++.macro gkiw_mark off, val
++	adrp	x9, gkiw_boot_markers
++	add	x9, x9, :lo12:gkiw_boot_markers
++	mov	w10, #\val
++	str	w10, [x9, #\off]
++.endm
++
+ SYM_FUNC_START(__enable_mmu)
++	gkiw_mark 0x20, 0x4e4d		// "NM" enter
+ 	mrs	x3, ID_AA64MMFR0_EL1
+ 	ubfx	x3, x3, #ID_AA64MMFR0_EL1_TGRAN_SHIFT, 4
+ 	cmp     x3, #ID_AA64MMFR0_EL1_TGRAN_SUPPORTED_MIN
+ 	b.lt    __no_granule_support
+ 	cmp     x3, #ID_AA64MMFR0_EL1_TGRAN_SUPPORTED_MAX
+ 	b.gt    __no_granule_support
++	gkiw_mark 0x24, 0x4f47		// "GO" granule ok
+ 	phys_to_ttbr x2, x2
+ 	msr	ttbr0_el1, x2			// load TTBR0
++	gkiw_mark 0x28, 0x3054		// "T0" ttbr0 loaded
+ 	load_ttbr1 x1, x1, x3
++	gkiw_mark 0x2c, 0x3154		// "T1" ttbr1 loaded
+ 
+ 	set_sctlr_el1	x0
++	gkiw_mark 0x30, 0x4d53		// "SM" sctlr/mmU on
+ 
+ 	ret
+ SYM_FUNC_END(__enable_mmu)
+@@ -506,10 +532,21 @@ SYM_FUNC_START_LOCAL(__no_granule_support)
  SYM_FUNC_END(__no_granule_support)
  
  SYM_FUNC_START_LOCAL(__primary_switch)
@@ -132,7 +164,7 @@ index ca04b338c..adcfba3c0 100644
  	adrp	x1, early_init_stack
  	mov	sp, x1
  	mov	x29, xzr
-@@ -517,7 +541,18 @@ SYM_FUNC_START_LOCAL(__primary_switch)
+@@ -517,7 +554,18 @@ SYM_FUNC_START_LOCAL(__primary_switch)
  	mov	x1, x21				// pass the FDT
  	bl	__pi_early_map_kernel		// Map and relocate the kernel
  
