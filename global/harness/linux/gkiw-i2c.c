@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/i2c-dev.h>
+#include <linux/i2c.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,19 +39,18 @@ int main(int argc, char **argv)
 		fprintf(stderr, "open %s: %s\n", path, strerror(errno));
 		return 1;
 	}
-	if (ioctl(fd, I2C_SLAVE, addr) < 0) {
-		fprintf(stderr, "I2C_SLAVE %#x: %s\n", addr, strerror(errno));
-		return 1;
-	}
-
 	if (!strcmp(argv[3], "w")) {
+		struct i2c_msg msg = { .addr = addr, .flags = 0, .len = 2 };
+
 		reg = strtol(argv[4], NULL, 0);
 		buf[0] = reg;
 		buf[1] = strtol(argv[5], NULL, 0);
-		n = write(fd, buf, 2);
+		msg.buf = buf;
+		n = ioctl(fd, I2C_RDWR, &(struct i2c_rdwr_ioctl_data){
+			.msgs = &msg, .nmsgs = 1 });
 		printf("write %#x=%#x: %d (%s)\n", reg, buf[1], n,
 		       n < 0 ? strerror(errno) : "ok");
-		return n == 2 ? 0 : 1;
+		return n < 0 ? 1 : 0;
 	}
 
 	reg = strtol(argv[3], NULL, 0);
@@ -60,17 +60,19 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	buf[0] = reg;
-	n = write(fd, buf, 1);
-	if (n != 1) {
-		fprintf(stderr, "write reg: %d (%s)\n", n, strerror(errno));
-		return 1;
-	}
+	{
+		struct i2c_msg msgs[2] = {
+			{ .addr = addr, .flags = 0, .len = 1, .buf = buf },
+			{ .addr = addr, .flags = I2C_M_RD, .len = len, .buf = buf },
+		};
 
-	n = read(fd, buf, len);
-	if (n < 0) {
-		fprintf(stderr, "read: %s\n", strerror(errno));
-		return 1;
+		buf[0] = reg;
+		n = ioctl(fd, I2C_RDWR, &(struct i2c_rdwr_ioctl_data){
+			.msgs = msgs, .nmsgs = 2 });
+		if (n < 0) {
+			fprintf(stderr, "read %#x: %s\n", reg, strerror(errno));
+			return 1;
+		}
 	}
 
 	printf("%#04x:", reg);

@@ -50,8 +50,10 @@ phone resets about 60 s after every boot.
   internal "tombak" codec and the PM8909 WCD analog block at SPMI `0xf000`.
   The MSM8909 LPASS/tombak digital side is not described by mainline; this
   needs LPASS nodes, DSP firmware and a machine driver.
-* **ALS/proximity**: the Epticore EM3071x at `0x24` on QUP1 has no mainline
-  driver and the vendor register map is not available from the stock DTB.
+* **ALS**: the Epticore EM3071x at `0x24` on QUP1 is enabled by a minimal
+  local IIO driver (`patches/0003-em3071x-als.patch`) derived from the vendor
+  driver. It reports a 12-bit ALS count and a nominal `raw * 10` lux; proximity
+  is not implemented. The part only answers SMBus *word* reads.
 
 ## USB console
 

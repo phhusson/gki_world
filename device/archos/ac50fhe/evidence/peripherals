@@ -37,3 +37,15 @@ Not enabled:
 * audio/mic: stock uses the internal "tombak" codec + PM8909 WCD analog block
   at SPMI 0xf000; the MSM8909 LPASS/tombak path is not described in mainline.
 * ALS/proximity: Epticore EM3071x at 0x24 on QUP1, no mainline driver.
+
+ALS (Epticore EM3071x at 0x24 on QUP1):
+
+```text
+iio:device1 em3071x
+in_illuminance_raw   = 1
+in_illuminance_input = 10
+```
+
+The chip ID register returns 0x31 and the ALS count is split over registers
+9/10; it only answers SMBus word reads, which is why the first byte-read probe
+returned EIO.

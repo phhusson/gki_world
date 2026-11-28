@@ -125,6 +125,13 @@
 		interrupt-parent = <&tlmm>;
 		interrupts = <96 IRQ_TYPE_EDGE_FALLING>;
 	};
+
+	light-sensor@24 {
+		compatible = "epticore,em3071x";
+		reg = <0x24>;
+		vdd-supply = <&pm8909_l17>;
+		vddio-supply = <&pm8909_l6>;
+	};
 };
 
 &blsp_i2c5 {
