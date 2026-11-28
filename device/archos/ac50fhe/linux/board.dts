@@ -16,6 +16,41 @@
 	compatible = "archos,ac50fhe", "qcom,msm8909";
 	chassis-type = "handset";
 
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pm8909_pwm 0 100000>;
+
+		brightness-levels = <0 255>;
+		num-interpolated-steps = <255>;
+		default-brightness-level = <255>;
+	};
+
+	chosen {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* LK leaves the DSI panel and MDP3 scanout running. */
+		framebuffer@83201000 {
+			compatible = "simple-framebuffer";
+			reg = <0x83300000 (720 * 1280 * 4)>;
+
+			width = <720>;
+			height = <1280>;
+			stride = <(720 * 4)>;
+			format = "a8r8g8b8";
+
+			power-domains = <&gcc MDSS_GDSC>;
+
+			clocks = <&gcc GCC_MDSS_AHB_CLK>,
+				 <&gcc GCC_MDSS_AXI_CLK>,
+				 <&gcc GCC_MDSS_VSYNC_CLK>,
+				 <&gcc GCC_MDSS_MDP_CLK>,
+				 <&gcc GCC_MDSS_BYTE0_CLK>,
+				 <&gcc GCC_MDSS_PCLK0_CLK>,
+				 <&gcc GCC_MDSS_ESC0_CLK>;
+		};
+	};
 };
 
 &{/reserved-memory} {
@@ -33,6 +68,11 @@
 	/* Mapped and reserved: the initramfs writes boot-progress markers here. */
 	gkiw_marker@9c000000 {
 		reg = <0x9c000000 0x1000>;
+	};
+
+	framebuffer@83201000 {
+		reg = <0x83300000 (720 * 1280 * 4)>;
+		no-map;
 	};
 };
 
@@ -70,6 +110,10 @@
 /* Volume Down is wired to the PMIC resin input. */
 &pm8909_resin {
 	linux,code = <KEY_VOLUMEDOWN>;
+	status = "okay";
+};
+
+&pm8909_pwm {
 	status = "okay";
 };
 
