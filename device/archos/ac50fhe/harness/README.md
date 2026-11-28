@@ -90,6 +90,15 @@ global/harness/2ndstage/host/gkiw-fastboot log \
 The Linux DT in a later boot image must reserve both regions with `no-map`, and
 its ramoops sizes must match `soc/qcom/msm8909/harness/gkiw-msm8909.config`.
 
+## Serial number
+
+LK passes the factory serial number in `/chosen/bootargs` as
+`androidboot.serialno=`. The QCDT FDT carrying it arrives in `r2`; the ARMv7
+start code saves that pointer at `0x90000000`, and `board_late_init()` copies
+the serial into U-Boot's `serial#`. `fastboot devices` therefore shows the real
+device serial (currently `185904e3`) instead of a fixed placeholder. If the FDT
+is missing, the board falls back to a CPU-ID-derived string.
+
 ## Hardware notes
 
 - Debug UART: BLSP1 UART2 at `0x78b0000`, 115200 (`ttyHSL0` on the stock
