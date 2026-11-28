@@ -1,9 +1,9 @@
 diff --git a/arch/arm/dts/msm8909-archos-ac50fhe.dts b/arch/arm/dts/msm8909-archos-ac50fhe.dts
 new file mode 100644
-index 0000000000..7b3d6f9756
+index 0000000000..0617408797
 --- /dev/null
 +++ b/arch/arm/dts/msm8909-archos-ac50fhe.dts
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,143 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * U-Boot dev second stage for the Archos 50f Helium (AC50FHE, MSM8909).
@@ -103,6 +103,20 @@ index 0000000000..7b3d6f9756
 +		 * this loader only resets the controller and switches it to
 +		 * device mode.
 +		 */
++		spmi_bus: spmi@200f000 {
++			compatible = "qcom,spmi-pmic-arb";
++			reg = <0x200f000 0x1000>,
++			      <0x2400000 0x400000>,
++			      <0x2c00000 0x400000>,
++			      <0x3800000 0x200000>,
++			      <0x200a000 0x2100>;
++			reg-names = "core", "chnls", "obsrvr", "intr", "cnfg";
++			qcom,ee = <0>;
++			qcom,channel = <0>;
++			#address-cells = <2>;
++			#size-cells = <0>;
++		};
++
 +		usb: usb@78d9000 {
 +			compatible = "qcom,ci-hdrc";
 +			reg = <0x78d9000 0x200>, <0x78d9200 0x200>;
@@ -143,25 +157,28 @@ index 0000000000..e21bdf6089
 +obj-y += gkiw-msm8909.o
 diff --git a/board/qualcomm/gkiw-msm8909/gkiw-msm8909.c b/board/qualcomm/gkiw-msm8909/gkiw-msm8909.c
 new file mode 100644
-index 0000000000..79b9fb55c8
+index 0000000000..9be7624a7a
 --- /dev/null
 +++ b/board/qualcomm/gkiw-msm8909/gkiw-msm8909.c
-@@ -0,0 +1,292 @@
+@@ -0,0 +1,339 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * gki_world development second stage for the Archos 50f Helium (MSM8909).
 + */
 +
 +#include <asm/io.h>
++#include <dm.h>
 +#include <asm/ptrace.h>
 +#include <env.h>
 +#include <g_dnl.h>
++#include <gkiw.h>
 +#include <fastboot.h>
 +#include <init.h>
 +#include <lmb.h>
 +#include <log.h>
 +#include <linux/bitops.h>
 +#include <linux/libfdt.h>
++#include <spmi/spmi.h>
 +#include <linux/string.h>
 +#include <linux/sizes.h>
 +#include <time.h>
@@ -384,10 +401,54 @@ index 0000000000..79b9fb55c8
 +	printf("gkiw: serial#=%s (fallback)\n", serial);
 +}
 +
++/*
++ * LK leaves the PM8909 LPG/PWM driving the panel backlight.  U-Boot's
++ * fastboot session can last a long time, so switch the LPG output off.
++ * PMIC USID 1, LPG channel 0 base 0xbc00.
++ */
++static void gkiw_backlight_off(void)
++{
++	struct udevice *bus;
++
++	if (uclass_get_device(UCLASS_SPMI, 0, &bus)) {
++		printf("gkiw: SPMI unavailable, backlight left on\n");
++		return;
++	}
++
++	spmi_reg_write(bus, 1, 0xbc, 0x46, 0);	/* PWM_ENABLE_CONTROL */
++	spmi_reg_write(bus, 1, 0xbc, 0x44, 0);	/* PWM_VALUE low */
++	spmi_reg_write(bus, 1, 0xbc, 0x45, 0);	/* PWM_VALUE high */
++	printf("gkiw: backlight off\n");
++}
++
++/*
++ * PMIC PON watchdog (independent of the APCS one).  Arm it just before
++ * booting a downloaded OS; the Linux pm8916_wdt driver takes it over and
++ * pings it, so a hung kernel still gets a warm reset.
++ * PON base 0x800 on PMIC USID 0.
++ */
++void gkiw_board_preboot(void)
++{
++	struct udevice *bus;
++
++	if (uclass_get_device(UCLASS_SPMI, 0, &bus)) {
++		printf("gkiw: SPMI unavailable, PMIC watchdog not armed\n");
++		return;
++	}
++
++	spmi_reg_write(bus, 0, 0x8, 0x54, 60);	/* S1 timer, seconds */
++	spmi_reg_write(bus, 0, 0x8, 0x55, 0);	/* S2 timer */
++	spmi_reg_write(bus, 0, 0x8, 0x56, 0x01);/* warm reset type */
++	spmi_reg_write(bus, 0, 0x8, 0x57, 0x80);/* S2 reset enable */
++	spmi_reg_write(bus, 0, 0x8, 0x58, 0x01);/* pet */
++	printf("gkiw: PMIC watchdog armed for 60s\n");
++}
++
 +int board_late_init(void)
 +{
 +	gkiw_set_usb_serial();
 +	gkiw_usb_clock_init();
++	gkiw_backlight_off();
 +
 +#if CONFIG_IS_ENABLED(FASTBOOT)
 +	phys_addr_t addr = CONFIG_FASTBOOT_BUF_ADDR;

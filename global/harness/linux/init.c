@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -23,6 +24,32 @@
 
 #define GADGET "/sys/kernel/config/usb_gadget/g1"
 #define TTY "/dev/ttyGS0"
+
+/*
+ * Boot-progress marker for the 2ndstage.  The page is reserved (but mapped)
+ * in the Linux DT; /dev/mem writes it uncached so it survives a watchdog
+ * reset and can be read with `fastboot oem pstore:...` from U-Boot.
+ */
+#define GKIW_MARKER_ADDR 0x9c000000
+static volatile unsigned int *gkiw_marker;
+
+static void gkiw_mark(unsigned int value)
+{
+	if (!gkiw_marker) {
+		void *p;
+		int fd = open("/dev/mem", O_RDWR | O_SYNC);
+
+		if (fd < 0)
+			return;
+		p = mmap(NULL, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED,
+			 fd, GKIW_MARKER_ADDR);
+		close(fd);
+		if (p == MAP_FAILED)
+			return;
+		gkiw_marker = p;
+	}
+	*gkiw_marker = value;
+}
 
 static void logmsg(const char *fmt, ...)
 {
@@ -154,8 +181,10 @@ int main(void)
 	mount("devtmpfs", "/dev", "devtmpfs", 0, NULL);
 	mount("proc", "/proc", "proc", 0, NULL);
 	mount("sysfs", "/sys", "sysfs", 0, NULL);
+	gkiw_mark(0x474b0002);
 
 	setup_gadget();
+	gkiw_mark(0x474b0003);
 
 	for (i = 0; i < 200; i++) {
 		fd = open(TTY, O_RDWR);
@@ -176,6 +205,7 @@ int main(void)
 	dup2(fd, 2);
 
 	install_applets();
+	gkiw_mark(0x474b0004);
 	setenv("PATH", "/bin:/sbin:/usr/bin:/usr/sbin", 1);
 	setenv("HOME", "/", 1);
 	setenv("TERM", "linux", 1);

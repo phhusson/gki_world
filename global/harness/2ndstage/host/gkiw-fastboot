@@ -50,6 +50,11 @@ def fetch_region(addr, size, serial=None):
         data += chunk
 
     if not data:
+        if "unknown command" in output:
+            raise RuntimeError(
+                "oem pstore requires U-Boot fastboot (version 0.4); "
+                "stock LK (version 0.5) does not implement it"
+            )
         raise RuntimeError(output.strip() or "no pstore data received")
     return bytes(data[:size])
 

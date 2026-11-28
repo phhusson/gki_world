@@ -137,6 +137,11 @@ Other bring-up findings:
 - The PHY is ULPI, not the 28 nm Femto PHY. The controller DTS uses the
   `qcom,usb-hs-phy-msm8916` node and the driver writes the vendor init sequence
   `<0x00 0x44, 0x01 0x6b, 0x02 0x24, 0x03 0x13>`.
+- The PM8909 LPG/PWM backlight is switched off in `board_late_init()` so a
+  long fastboot/bringup session does not drain the battery through the panel.
+- The PMIC PON watchdog is armed for 60 s (warm reset) just before booting an
+  OS; Linux's `pm8916_wdt` driver takes it over and pings it, so a hung kernel
+  resets even if the APCS watchdog does not survive the kernel.
 
 ## Still missing
 

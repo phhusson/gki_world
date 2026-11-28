@@ -168,6 +168,13 @@ set -- --kernel "$KERNEL_IMAGE" --ramdisk "$RAMDISK" \
 if [ -n "${GKIW_BOOTIMG_RAMDISK_OFFSET:-}" ]; then
 	set -- "$@" --ramdisk_offset "$GKIW_BOOTIMG_RAMDISK_OFFSET"
 fi
+if [ -n "${GKIW_BOOTIMG_SECOND:-}" ]; then
+	[ -f "$GKIW_BOOTIMG_SECOND" ] || {
+		echo "mkbootimg: missing second payload: $GKIW_BOOTIMG_SECOND" >&2
+		exit 1
+	}
+	set -- "$@" --second "$GKIW_BOOTIMG_SECOND"
+fi
 if [ -n "${GKIW_BOOTIMG_SECOND_OFFSET:-}" ]; then
 	set -- "$@" --second_offset "$GKIW_BOOTIMG_SECOND_OFFSET"
 fi

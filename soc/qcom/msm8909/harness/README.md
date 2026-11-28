@@ -192,8 +192,13 @@ the fastboot session persists indefinitely.
 
 `CONFIG_SYSRESET_WATCHDOG_AUTO` registers the watchdog as the sysreset device,
 so U-Boot's `reset` (used by `fastboot reboot`) expires the watchdog instead of
-relying on PSCI. `fastboot_preboot()` arms it again before booting a Linux
-image, so a hung kernel returns to the boot chain.
+relying on PSCI.
+
+`fastboot_preboot()` arms both the APCS watchdog (30 s) and the PMIC PON
+watchdog (60 s, warm reset). The PMIC watchdog is independent of the APCS and
+is taken over by Linux's `pm8916_wdt` driver, which pings it; a hung kernel
+therefore resets even when the APCS arm does not survive the kernel. The PMIC
+backlight LPG is switched off in `board_late_init()` as well.
 
 `fastboot_set_reboot_flag()` still writes the stock LK restart reason
 `0x77665500` to IMEM `0x0860065c`, but the AC50FHE LK ignores it:

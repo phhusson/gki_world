@@ -1,0 +1,32 @@
+--- a/cmd/gkiw.c
++++ b/cmd/gkiw.c
+@@ -292,6 +292,10 @@
+  * missing watchdog is reported but not fatal: a broken watchdog must not stop
+  * the development loop.
+  */
++void __weak gkiw_board_preboot(void)
++{
++}
++
+ void fastboot_preboot(void)
+ {
+ 	const char *override = env_get("gkiw_wdt_preboot");
+@@ -315,6 +319,8 @@
+ 		printf("gkiw: cannot arm watchdog (%d)\n", ret);
+ 	else
+ 		printf("gkiw: watchdog armed for %lld ms\n", timeout_ms);
++
++	gkiw_board_preboot();
+ }
+ 
+ static int gkiw_do_pstore(int argc, char *const argv[])
+--- a/include/gkiw.h
++++ b/include/gkiw.h
+@@ -9,4 +9,7 @@
+ void gkiw_log_console_char(char c);
+ void gkiw_log_crash(struct pt_regs *regs);
+ 
++/* Board hook: arm board-specific recovery watchdogs before booting an OS. */
++void gkiw_board_preboot(void);
++
+ #endif /* __GKIW_H */
