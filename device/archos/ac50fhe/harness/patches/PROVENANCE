@@ -5,6 +5,7 @@ sources:
     path: device/archos/ac50fhe/harness/patches
     derived:
       - 0105-board-qualcomm-gkiw-ac50fhe.patch
+      - 0106-board-battery.patch
     note: >-
       Original gki_world board data for the Archos 50f Helium.  The DTS is a
       minimal U-Boot-only tree; it does not reuse the downstream vendor DTB.

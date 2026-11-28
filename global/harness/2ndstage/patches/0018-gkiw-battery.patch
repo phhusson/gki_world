@@ -1,0 +1,59 @@
+--- a/cmd/gkiw.c
++++ b/cmd/gkiw.c
+@@ -296,6 +296,31 @@
+ {
+ }
+ 
++/* Board hook: read the battery voltage in microvolts. */
++int __weak gkiw_board_battery_uv(int *uv)
++{
++	return -ENOSYS;
++}
++
++static int gkiw_do_battery(int argc, char *const argv[])
++{
++	int uv;
++	int ret;
++
++	if (argc != 1)
++		return CMD_RET_USAGE;
++
++	ret = gkiw_board_battery_uv(&uv);
++	if (ret) {
++		printf("gkiw: battery read failed: %d\n", ret);
++		return CMD_RET_FAILURE;
++	}
++
++	printf("gkiw: battery %d mV\n", (uv + 500) / 1000);
++
++	return 0;
++}
++
+ void fastboot_preboot(void)
+ {
+ 	const char *override = env_get("gkiw_wdt_preboot");
+@@ -387,6 +412,8 @@
+ 		return gkiw_do_pstore(argc - 1, argv + 1);
+ 	if (!strcmp(argv[1], "watchdog"))
+ 		return gkiw_do_watchdog(argc - 1, argv + 1);
++	if (!strcmp(argv[1], "battery"))
++		return gkiw_do_battery(argc - 1, argv + 1);
+ 	if (!strcmp(argv[1], "log"))
+ 		return gkiw_do_log(argc - 1, argv + 1);
+ 
+@@ -398,4 +425,5 @@
+ 	   "pstore <addr> <size> [offset] [len] - hex dump a RAM/pstore region\n"
+ 	   "gkiw watchdog [ms|off] - arm (default " __stringify(CONFIG_GKIW_WDT_TIMEOUT_MS)
+ 	   " ms) or stop the watchdog\n"
++	   "gkiw battery - print the PMIC battery voltage\n"
+ 	   "gkiw log [previous|current|clear] - show or clear the 2ndstage console log");
+--- a/include/gkiw.h
++++ b/include/gkiw.h
+@@ -12,4 +12,7 @@
+ /* Board hook: arm board-specific recovery watchdogs before booting an OS. */
+ void gkiw_board_preboot(void);
+ 
++/* Board hook: read the battery voltage in microvolts.  Returns 0 on success. */
++int gkiw_board_battery_uv(int *uv);
++
+ #endif /* __GKIW_H */

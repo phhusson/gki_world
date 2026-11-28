@@ -11,6 +11,7 @@ image, with the U-Boot stage in the `boot` partition and the backlight off.
 - `watchdog`: the PM8916 PON watchdog device bound to `pm8916-wdt`
 - `apcs_mailbox`: the APCS mailbox bound to `qcom_apcs_ipc`
 - `watchdog-heartbeat`: userspace watchdog / host heartbeat timeline
+- `battery-2ndstage`: U-Boot PM8909 VADC battery read and calibration
 - `dmesg`: kernel log from the ACM shell
 
 The RPM/APCS mailbox now probes, so the USB PHY uses the real PM8909 L7/L13

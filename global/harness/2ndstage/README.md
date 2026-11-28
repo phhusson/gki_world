@@ -74,6 +74,7 @@ boards the bootloader and Linux trees must not add a UART pinctrl node.
 | decode Linux pstore | `fastboot oem pstore-display:console` |
 | reset on hang | watchdog armed in `fastboot_preboot()` |
 | manual watchdog | `gkiw watchdog [ms\|off]` on the UART |
+| battery voltage | `gkiw battery` on the UART (also logged at boot) |
 
 `oem pstore` uses U-Boot's multiresponse machinery: the device sends `INFO`
 lines of `<offset>:<hex>`, 24 bytes per line, then `OKAY`. The stock `fastboot`

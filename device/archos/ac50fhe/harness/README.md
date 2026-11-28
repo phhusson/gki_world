@@ -139,6 +139,10 @@ Other bring-up findings:
   `<0x00 0x44, 0x01 0x6b, 0x02 0x24, 0x03 0x13>`.
 - The PM8909 LPG/PWM backlight is switched off in `board_late_init()` so a
   long fastboot/bringup session does not drain the battery through the panel.
+- The battery voltage is read from the PM8909 VADC (`VBAT_SNS`, channel `0x06`,
+  1/3 prescaler) in `board_late_init()` and through the `gkiw battery` command.
+  The 1.25 V/0.625 V reference channels calibrate it. The test unit reports
+  4080 mV while USB powered; the result also appears in the 2ndstage log.
 - The PMIC PON watchdog is armed for 60 s (warm reset) just before booting an
   OS. On Linux, `/init` owns `/dev/watchdog` from userspace and only pings it
   while the host sends heartbeats on the second ACM port, so losing the host or
