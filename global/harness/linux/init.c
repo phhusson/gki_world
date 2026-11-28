@@ -9,6 +9,9 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/watchdog.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,10 +23,20 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 #define GADGET "/sys/kernel/config/usb_gadget/g1"
 #define TTY "/dev/ttyGS0"
+#define HBTTY "/dev/ttyGS1"
+
+/*
+ * Userspace owns the PMIC watchdog.  It is only petted while the host keeps
+ * sending heartbeats on the second ACM port, so losing the USB link (or the
+ * host test harness) resets the phone back into the second stage.
+ */
+#define GKIW_WDT_TIMEOUT 30
+#define GKIW_WDT_HEARTBEAT 5
 
 /*
  * Boot-progress marker for the 2ndstage.  The page is reserved (but mapped)
@@ -58,6 +71,27 @@ static void logmsg(const char *fmt, ...)
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
+}
+
+/* Log from the detached watchdog daemon; stderr may be the console tty. */
+static void klog(const char *fmt, ...)
+{
+	char buf[256];
+	va_list ap;
+	int fd;
+	int len;
+
+	va_start(ap, fmt);
+	len = vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	if (len < 0 || len >= (int)sizeof(buf))
+		return;
+
+	fd = open("/dev/kmsg", O_WRONLY);
+	if (fd < 0)
+		return;
+	write(fd, buf, len);
+	close(fd);
 }
 
 static int write_file(const char *path, const char *fmt, ...)
@@ -136,6 +170,7 @@ static void setup_gadget(void)
 	write_file(GADGET "/configs/c.1/MaxPower", "250");
 
 	make_dir(GADGET "/functions/acm.gs0");
+	make_dir(GADGET "/functions/acm.gs1");
 
 	/*
 	 * configfs resolves the symlink target relative to the caller's cwd.
@@ -143,9 +178,13 @@ static void setup_gadget(void)
 	 */
 	if (chdir(GADGET)) {
 		logmsg("gkiw: chdir %s: %s\n", GADGET, strerror(errno));
-	} else if (symlink("functions/acm.gs0", "configs/c.1/acm.gs0") &&
-		   errno != EEXIST) {
-		logmsg("gkiw: symlink acm: %s\n", strerror(errno));
+	} else {
+		if (symlink("functions/acm.gs0", "configs/c.1/acm.gs0") &&
+		    errno != EEXIST)
+			logmsg("gkiw: symlink acm.gs0: %s\n", strerror(errno));
+		if (symlink("functions/acm.gs1", "configs/c.1/acm.gs1") &&
+		    errno != EEXIST)
+			logmsg("gkiw: symlink acm.gs1: %s\n", strerror(errno));
 	}
 
 	if (first_udc(udc, sizeof(udc))) {
@@ -168,6 +207,84 @@ static void install_applets(void)
 	}
 	if (pid > 0)
 		waitpid(pid, NULL, 0);
+}
+
+/*
+ * Own /dev/watchdog and only ping it while heartbeats are arriving on the
+ * second ACM port.  The kernel stops its own keepalive as soon as the device
+ * is opened, so a host that stops pinging (harness crash, USB unplug, host
+ * reboot) gets a reset after GKIW_WDT_TIMEOUT seconds.
+ */
+static void watchdog_daemon(void)
+{
+	unsigned int timeout = GKIW_WDT_TIMEOUT;
+	struct termios tio;
+	int beating = -1;
+	time_t last;
+	int wdt, hb;
+	int i;
+
+	/* The console may go away while we are still supposed to reset. */
+	signal(SIGHUP, SIG_IGN);
+	signal(SIGPIPE, SIG_IGN);
+
+	wdt = open("/dev/watchdog", O_WRONLY);
+	if (wdt < 0) {
+		klog("gkiw-wdt: no /dev/watchdog: %s\n", strerror(errno));
+		return;
+	}
+	if (ioctl(wdt, WDIOC_SETTIMEOUT, &timeout))
+		klog("gkiw-wdt: set timeout failed: %s\n", strerror(errno));
+	ioctl(wdt, WDIOC_GETTIMEOUT, &timeout);
+
+	for (i = 0; i < 200; i++) {
+		hb = open(HBTTY, O_RDONLY | O_NOCTTY | O_NONBLOCK);
+		if (hb >= 0)
+			break;
+		usleep(50000);
+	}
+	if (hb < 0) {
+		klog("gkiw-wdt: %s missing: %s (watchdog left to the kernel)\n",
+		     HBTTY, strerror(errno));
+		return;
+	}
+
+	if (!tcgetattr(hb, &tio)) {
+		cfmakeraw(&tio);
+		tcsetattr(hb, TCSANOW, &tio);
+	}
+
+	last = time(NULL);
+
+	/* Reload the hardware timer with our timeout before waiting. */
+	ioctl(wdt, WDIOC_KEEPALIVE, 0);
+	klog("gkiw-wdt: %us timeout, heartbeat on %s\n", timeout, HBTTY);
+
+	for (;;) {
+		struct pollfd pfd = {
+			.fd = hb,
+			.events = POLLIN,
+		};
+		int now_beating;
+		int ret;
+
+		ret = poll(&pfd, 1, 1000);
+		if (ret > 0 && (pfd.revents & POLLIN)) {
+			char buf[64];
+
+			if (read(hb, buf, sizeof(buf)) > 0)
+				last = time(NULL);
+		}
+
+		now_beating = time(NULL) - last <= GKIW_WDT_HEARTBEAT;
+		if (now_beating != beating) {
+			klog("gkiw-wdt: host heartbeat %s\n",
+			     now_beating ? "started" : "lost");
+			beating = now_beating;
+		}
+		if (now_beating)
+			ioctl(wdt, WDIOC_KEEPALIVE, 0);
+	}
 }
 
 int main(void)
@@ -206,6 +323,13 @@ int main(void)
 
 	install_applets();
 	gkiw_mark(0x474b0004);
+
+	/* Start the watchdog owner before the shell takes over the console. */
+	if (fork() == 0) {
+		watchdog_daemon();
+		_exit(0);
+	}
+
 	setenv("PATH", "/bin:/sbin:/usr/bin:/usr/sbin", 1);
 	setenv("HOME", "/", 1);
 	setenv("TERM", "linux", 1);
@@ -223,7 +347,9 @@ int main(void)
 	chdir("/");
 
 	logmsg("\n\ngkiw: USB ACM shell ready on /dev/ttyGS0\n");
-	logmsg("gkiw: host: socat - /dev/ttyACM0,raw,echo=0\n\n");
+	logmsg("gkiw: host: socat - /dev/ttyACM0,raw,echo=0\n");
+	logmsg("gkiw: heartbeat: write to /dev/ttyACM1 or the phone resets in %ds\n\n",
+	       GKIW_WDT_TIMEOUT);
 
 	execl("/bin/busybox", "busybox", "sh", "-i", NULL);
 	logmsg("gkiw: exec busybox failed: %s\n", strerror(errno));

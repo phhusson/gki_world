@@ -20,6 +20,36 @@ index 54732effd..d74cb4ac7 100644
  			reg = <0x0b011000 0x1000>;
  			#mbox-cells = <1>;
  			clocks = <&a7pll>, <&gcc GPLL0>;
+diff --git a/drivers/mailbox/qcom-apcs-ipc-mailbox.c b/drivers/mailbox/qcom-apcs-ipc-mailbox.c
+index d3a8f6b4a..6a5d7b213 100644
+--- a/drivers/mailbox/qcom-apcs-ipc-mailbox.c
++++ b/drivers/mailbox/qcom-apcs-ipc-mailbox.c
+@@ -7,6 +7,7 @@
+ #include <linux/module.h>
+ #include <linux/io.h>
+ #include <linux/slab.h>
++#include <linux/mfd/syscon.h>
+ #include <linux/of.h>
+ #include <linux/of_platform.h>
+ #include <linux/platform_device.h>
+@@ -94,6 +95,17 @@ static int qcom_apcs_ipc_probe(struct platform_device *pdev)
+ 	if (IS_ERR(regmap))
+ 		return PTR_ERR(regmap);
+ 
++	/*
++	 * SMP2P and SMSM still use the legacy "qcom,ipc = <&apcs offset bit>"
++	 * bindings and resolve them through syscon.  On MSM8909 the APCS node
++	 * is owned by this driver instead of the generic "syscon" driver, so
++	 * publish the regmap explicitly to keep both interfaces working.
++	 */
++	ret = of_syscon_register_regmap(pdev->dev.of_node, regmap);
++	if (ret)
++		dev_warn(&pdev->dev, "failed to register syscon regmap: %d\n",
++			 ret);
++
+ 	apcs_data = of_device_get_match_data(&pdev->dev);
+ 
+ 	apcs->regmap = regmap;
 diff --git a/drivers/watchdog/pm8916_wdt.c b/drivers/watchdog/pm8916_wdt.c
 index 007ed139a..b70e73c05 100644
 --- a/drivers/watchdog/pm8916_wdt.c

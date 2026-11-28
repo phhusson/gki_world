@@ -140,8 +140,9 @@ Other bring-up findings:
 - The PM8909 LPG/PWM backlight is switched off in `board_late_init()` so a
   long fastboot/bringup session does not drain the battery through the panel.
 - The PMIC PON watchdog is armed for 60 s (warm reset) just before booting an
-  OS; Linux's `pm8916_wdt` driver takes it over and pings it, so a hung kernel
-  resets even if the APCS watchdog does not survive the kernel.
+  OS. On Linux, `/init` owns `/dev/watchdog` from userspace and only pings it
+  while the host sends heartbeats on the second ACM port, so losing the host or
+  the USB link resets the phone back into the second stage.
 
 ## Still missing
 

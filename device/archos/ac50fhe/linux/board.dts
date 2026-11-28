@@ -15,28 +15,6 @@
 	model = "Archos 50f Helium";
 	compatible = "archos,ac50fhe", "qcom,msm8909";
 	chassis-type = "handset";
-
-	/*
-	 * LK leaves the PM8909 USB LDOs on.  Use fixed always-on supplies so
-	 * the ULPI PHY does not depend on the RPM regulator channel while the
-	 * SMD/RPM mailbox is still being brought up.
-	 */
-	usb_v1p8: regulator-usb-v1p8 {
-		compatible = "regulator-fixed";
-		regulator-name = "usb_v1p8";
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <1800000>;
-		regulator-always-on;
-	};
-
-	usb_v3p3: regulator-usb-v3p3 {
-		compatible = "regulator-fixed";
-		regulator-name = "usb_v3p3";
-		regulator-min-microvolt = <3075000>;
-		regulator-max-microvolt = <3075000>;
-		regulator-always-on;
-	};
-
 };
 
 &{/reserved-memory} {
@@ -57,6 +35,18 @@
 	};
 };
 
+/*
+ * The APC mailbox driver only needs the IPC register window.  The "pll" and
+ * "aux" clocks listed in the SoC dtsi are consumed by the APCS CPU clock
+ * driver, which we do not use (the A53 PLL block does not respond on this
+ * MSM8909 and hangs the boot).  Drop them so fw_devlink does not block the
+ * mailbox on the a7pll supplier.
+ */
+&apcs {
+	/delete-property/ clocks;
+	/delete-property/ clock-names;
+};
+
 &pm8909_usbin {
 	status = "okay";
 };
@@ -68,8 +58,7 @@
 };
 
 &usb_hs_phy {
-	v1p8-supply = <&usb_v1p8>;
-	v3p3-supply = <&usb_v3p3>;
+	/* v1p8/v3p3 supplies come from qcom-msm8909-pm8909.dtsi (L7/L13). */
 	extcon = <&pm8909_usbin>;
 };
 

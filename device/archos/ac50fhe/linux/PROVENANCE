@@ -9,5 +9,9 @@ patches:
   - patches/0001-msm8909-apcs-mailbox-and-pm8916-wdt-warm.patch
 notes: >-
   The board tree and the reserved-memory/marker nodes are local.  The patch
-  carries the qcom-msm8909.dtsi mailbox tweak (attempted RPM fix) and the
-  pm8916_wdt warm-reset change so ramoops survives the PMIC watchdog.
+  switches the MSM8909 SMD edge to the APCS mailbox, publishes the APCS regmap
+  as a syscon so the legacy SMP2P/SMSM qcom,ipc users still work, and changes
+  pm8916_wdt to warm reset so ramoops survives the PMIC watchdog.  The PON
+  driver must be enabled (CONFIG_POWER_RESET_QCOM_PON) so the watchdog child
+  gets populated, and CONFIG_QCOM_A53PLL must stay off: the block hangs this
+  SoC before console init.

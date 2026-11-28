@@ -1,0 +1,33 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Keep the gki_world Linux watchdog alive.
+#
+# The phone runs a userspace watchdog owner: it resets unless it receives a
+# heartbeat on the second USB ACM port.  Losing the host, the harness or the
+# USB link therefore recovers the phone into the second stage by itself.
+# Keep this running for as long as the console is needed.
+#
+# Usage: gkiw-heartbeat [/dev/ttyACM1] [interval-seconds]
+
+set -u
+
+DEV=${1:-/dev/ttyACM1}
+PERIOD=${2:-1}
+
+while :; do
+	if [ ! -e "$DEV" ]; then
+		sleep 1
+		continue
+	fi
+
+	if exec 3> "$DEV" 2>/dev/null; then
+		while :; do
+			printf 'P' >&3 2>/dev/null || break
+			sleep "$PERIOD"
+		done
+		exec 3>&-
+		echo "gkiw-heartbeat: lost $DEV, waiting for it to come back" >&2
+	fi
+	sleep 1
+done

@@ -1,0 +1,21 @@
+# Userspace watchdog heartbeat
+
+The Linux image owns the PMIC PON watchdog from userspace (`/init` forks a
+daemon that opens `/dev/watchdog` and only pings while the host writes to the
+second ACM port, `/dev/ttyACM1`).
+
+Observed on the phone (pstore console, no host heartbeat):
+
+```text
+[    1.566100] gkiw-wdt: 30s timeout, heartbeat on /dev/ttyGS1
+[    2.567422] gkiw-wdt: host heartbeat started
+[   25.824993] gkiw-wdt: host heartbeat lost
+[   54.827664] watchdog0: pretimeout event
+```
+
+The first heartbeat is ModemManager probing the new port; it stops after about
+20 s and the phone resets 30 s after the last ping.
+
+Positive test with `global/harness/2ndstage/host/gkiw-heartbeat /dev/ttyACM1`:
+the phone stayed up past 91 s of uptime. Stopping the host helper then reset
+the phone 36 s later (30 s timeout plus the 5 s heartbeat window).
