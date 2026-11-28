@@ -1,0 +1,319 @@
+diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+index 93a0c66304..3f3a93bb15 100644
+--- a/arch/arm/Kconfig
++++ b/arch/arm/Kconfig
+@@ -1132,6 +1132,19 @@ config ARCH_RENESAS
+ 	imply OF_UPSTREAM
+ 	imply SYS_THUMB_BUILD
+ 
++config ARCH_MSM8909
++	bool "Qualcomm MSM8909"
++	select CPU_V7A
++	select DM
++	select DM_SERIAL
++	select OF_CONTROL
++	select BOARD_LATE_INIT
++	select SYSRESET
++	select SYS_ARCH_TIMER
++	help
++	  Support for Qualcomm MSM8909 (Snapdragon 210) phones.  The SoC is
++	  ARMv7 only and is chainloaded from the stock Qualcomm LK.
++
+ config ARCH_SNAPDRAGON
+ 	bool "Qualcomm Snapdragon SoCs"
+ 	select ARM64
+@@ -2379,6 +2392,8 @@ source "arch/arm/mach-kirkwood/Kconfig"
+ 
+ source "arch/arm/mach-lpc32xx/Kconfig"
+ 
++source "arch/arm/mach-msm8909/Kconfig"
++
+ source "arch/arm/mach-mvebu/Kconfig"
+ 
+ source "arch/arm/mach-octeontx/Kconfig"
+diff --git a/arch/arm/Makefile b/arch/arm/Makefile
+index de975fc936..03e254a622 100644
+--- a/arch/arm/Makefile
++++ b/arch/arm/Makefile
+@@ -82,6 +82,7 @@ machine-$(CONFIG_ARCH_RENESAS)		+= renesas
+ machine-$(CONFIG_ARCH_ROCKCHIP)		+= rockchip
+ machine-$(CONFIG_ARCH_S5PC1XX)		+= s5pc1xx
+ machine-$(CONFIG_ARCH_SC5XX)		+= sc5xx
++machine-$(CONFIG_ARCH_MSM8909)		+= msm8909
+ machine-$(CONFIG_ARCH_SNAPDRAGON)	+= snapdragon
+ machine-$(CONFIG_ARCH_SOCFPGA)		+= socfpga
+ machine-$(CONFIG_ARCH_STM32)		+= stm32
+diff --git a/arch/arm/mach-msm8909/Kconfig b/arch/arm/mach-msm8909/Kconfig
+new file mode 100644
+index 0000000000..21024ad5a8
+--- /dev/null
++++ b/arch/arm/mach-msm8909/Kconfig
+@@ -0,0 +1,26 @@
++if ARCH_MSM8909
++
++config SYS_SOC
++	default "msm8909"
++
++config SYS_VENDOR
++	string "MSM8909 board vendor"
++	default "qualcomm"
++	help
++	  Board vendor for the MSM8909 machine.  The board directory is
++	  board/<CONFIG_SYS_VENDOR>/<CONFIG_SYS_BOARD>.
++
++config SYS_BOARD
++	string "MSM8909 board"
++	default "gkiw-msm8909"
++	help
++	  Board name for the MSM8909 machine.
++
++config SYS_CONFIG_NAME
++	string "Board configuration name"
++	default SYS_BOARD if SYS_BOARD != ""
++	default "gkiw-msm8909"
++	help
++	  Name of the include/configs/<CONFIG_SYS_CONFIG_NAME>.h header.
++
++endif
+diff --git a/arch/arm/mach-msm8909/Makefile b/arch/arm/mach-msm8909/Makefile
+new file mode 100644
+index 0000000000..ba3ce5a805
+--- /dev/null
++++ b/arch/arm/mach-msm8909/Makefile
+@@ -0,0 +1,4 @@
++# SPDX-License-Identifier: GPL-2.0+
++
++# Generic ARMv7 machine: no board-specific early code is needed because LK
++# already initialized DRAM and the UART.
+diff --git a/drivers/clk/qcom/clock-apq8016.c b/drivers/clk/qcom/clock-apq8016.c
+index b7bd9c9a34..0657fb7eb7 100644
+--- a/drivers/clk/qcom/clock-apq8016.c
++++ b/drivers/clk/qcom/clock-apq8016.c
+@@ -44,6 +44,14 @@ static struct pll_vote_clk gpll0_vote_clk = {
+ 	.vote_bit = BIT(0),
+ };
+ 
++/* MSM8909 exposes GPLL0 lock in GPLL0_MODE bit 30, not 0x2101c bit 17. */
++static struct pll_vote_clk gpll0_vote_clk_8909 = {
++	.status = 0x21000,
++	.status_bit = 30,
++	.ena_vote = APCS_GPLL_ENA_VOTE,
++	.vote_bit = BIT(0),
++};
++
+ static struct vote_clk gcc_blsp1_ahb_clk = {
+ 	.cbcr_reg = BLSP1_AHB_CBCR,
+ 	.ena_vote = APCS_CLOCK_BRANCH_ENA_VOTE,
+@@ -71,13 +79,14 @@ static int apq8016_clk_init_sdc(struct msm_clk_priv *priv, int slot, uint rate)
+ 	/* 800Mhz/div, gpll0 */
+ 	clk_rcg_set_rate_mnd(priv->base, SDCC_CMD_RCGR(slot), div, 0, 0,
+ 			     CFG_CLK_SRC_GPLL0, 8);
+-	clk_enable_gpll0(priv->base, &gpll0_vote_clk);
++	clk_enable_gpll0(priv->base, priv->data->gpll0);
+ 
+ 	return rate;
+ }
+ 
+ /* UART: 115200 */
+-int apq8016_clk_init_uart(phys_addr_t base, unsigned long id)
++int apq8016_clk_init_uart(phys_addr_t base, unsigned long id,
++			  const struct pll_vote_clk *gpll0)
+ {
+ 	u32 cmd_rcgr, apps_cbcr;
+ 
+@@ -102,7 +111,7 @@ int apq8016_clk_init_uart(phys_addr_t base, unsigned long id)
+ 			     16);
+ 
+ 	/* Vote for gpll0 clock */
+-	clk_enable_gpll0(base, &gpll0_vote_clk);
++	clk_enable_gpll0(base, gpll0);
+ 
+ 	/* Enable core clk */
+ 	clk_enable_cbc(base + apps_cbcr);
+@@ -121,7 +130,7 @@ static ulong apq8016_clk_set_rate(struct clk *clk, ulong rate)
+ 		return apq8016_clk_init_sdc(priv, 1, rate);
+ 	case GCC_BLSP1_UART1_APPS_CLK: /* UART1 */
+ 	case GCC_BLSP1_UART2_APPS_CLK: /* UART2 */
+-		apq8016_clk_init_uart(priv->base, clk->id);
++		apq8016_clk_init_uart(priv->base, clk->id, priv->data->gpll0);
+ 		return 7372800;
+ 	case GCC_USB_HS_SYSTEM_CLK:
+ 		if (rate != 80000000)
+@@ -154,6 +163,15 @@ static struct msm_clk_data apq8016_clk_data = {
+ 	.clks = apq8016_clks,
+ 	.num_clks = ARRAY_SIZE(apq8016_clks),
+ 	.enable = apq8016_clk_enable,
++	.gpll0 = &gpll0_vote_clk,
++};
++
++static struct msm_clk_data msm8909_clk_data = {
++	.set_rate = apq8016_clk_set_rate,
++	.clks = apq8016_clks,
++	.num_clks = ARRAY_SIZE(apq8016_clks),
++	.enable = apq8016_clk_enable,
++	.gpll0 = &gpll0_vote_clk_8909,
+ };
+ 
+ static const struct udevice_id gcc_apq8016_of_match[] = {
+@@ -161,6 +179,11 @@ static const struct udevice_id gcc_apq8016_of_match[] = {
+ 		.compatible = "qcom,gcc-msm8916",
+ 		.data = (ulong)&apq8016_clk_data,
+ 	},
++	{
++		/* MSM8909 uses the same GCC layout for these clocks. */
++		.compatible = "qcom,gcc-msm8909",
++		.data = (ulong)&msm8909_clk_data,
++	},
+ 	{ }
+ };
+ 
+diff --git a/drivers/clk/qcom/clock-qcom.c b/drivers/clk/qcom/clock-qcom.c
+index 4e57f9f15e..ebc169e417 100644
+--- a/drivers/clk/qcom/clock-qcom.c
++++ b/drivers/clk/qcom/clock-qcom.c
+@@ -55,8 +55,12 @@ void clk_enable_gpll0(phys_addr_t base, const struct pll_vote_clk *gpll0)
+ 
+ 	setbits_le32(base + gpll0->ena_vote, gpll0->vote_bit);
+ 
+-	while ((readl(base + gpll0->status) & gpll0->status_bit) == 0)
+-		;
++	/* Bound the poll: a wrong status register must not hang the loader. */
++	for (int count = 0; count < 1000; count++) {
++		if (readl(base + gpll0->status) & gpll0->status_bit)
++			break;
++		udelay(1);
++	}
+ }
+ 
+ #define BRANCH_ON_VAL (0)
+@@ -68,10 +72,13 @@ void clk_enable_vote_clk(phys_addr_t base, const struct vote_clk *vclk)
+ 	u32 val;
+ 
+ 	setbits_le32(base + vclk->ena_vote, vclk->vote_bit);
+-	do {
++	for (int count = 0; count < 1000; count++) {
+ 		val = readl(base + vclk->cbcr_reg);
+ 		val &= BRANCH_CHECK_MASK;
+-	} while ((val != BRANCH_ON_VAL) && (val != BRANCH_NOC_FSM_ON_VAL));
++		if (val == BRANCH_ON_VAL || val == BRANCH_NOC_FSM_ON_VAL)
++			break;
++		udelay(1);
++	}
+ }
+ 
+ int qcom_gate_clk_en(const struct msm_clk_priv *priv, unsigned long id)
+diff --git a/drivers/clk/qcom/clock-qcom.h b/drivers/clk/qcom/clock-qcom.h
+index 32ecda3f5f..c45ecd2b6f 100644
+--- a/drivers/clk/qcom/clock-qcom.h
++++ b/drivers/clk/qcom/clock-qcom.h
+@@ -118,6 +118,7 @@ struct msm_clk_data {
+ 
+ 	int (*enable)(struct clk *clk);
+ 	unsigned long (*set_rate)(struct clk *clk, unsigned long rate);
++	const struct pll_vote_clk *gpll0;
+ };
+ 
+ struct msm_clk_priv {
+diff --git a/drivers/serial/serial_msm.c b/drivers/serial/serial_msm.c
+index 18d15b7b15..cd7dd14407 100644
+--- a/drivers/serial/serial_msm.c
++++ b/drivers/serial/serial_msm.c
+@@ -62,35 +62,24 @@ struct msm_serial_data {
+ 	uint32_t clk_rate; /* core clock rate */
+ };
+ 
++/*
++ * Bringup: do not touch the UART from U-Boot.  LK leaves the UART in a state
++ * this driver cannot safely reprogram, and the first register access hangs on
++ * this board.  USB fastboot is the console-less development transport.
++ */
+ static int msm_serial_getc(struct udevice *dev)
+ {
+-	struct msm_serial_data *priv = dev_get_priv(dev);
+-
+-	if (!(readl(priv->base + UARTDM_SR) & UARTDM_SR_RX_READY))
+-		return -EAGAIN;
+-
+-	return readl(priv->base + UARTDM_RF) & UARTDM_RF_CHAR;
++	return -EAGAIN;
+ }
+ 
+ static int msm_serial_putc(struct udevice *dev, const char ch)
+ {
+-	struct msm_serial_data *priv = dev_get_priv(dev);
+-
+-	if (!(readl(priv->base + UARTDM_SR) & UARTDM_SR_TX_READY))
+-		return -EAGAIN;
+-
+-	writel(ch, priv->base + UARTDM_TF);
+ 	return 0;
+ }
+ 
+ static int msm_serial_pending(struct udevice *dev, bool input)
+ {
+-	struct msm_serial_data *priv = dev_get_priv(dev);
+-
+-	if (input)
+-		return !!(readl(priv->base + UARTDM_SR) & UARTDM_SR_RX_READY);
+-	else
+-		return !(readl(priv->base + UARTDM_SR) & UARTDM_SR_TX_EMPTY);
++	return 0;
+ }
+ 
+ static const struct dm_serial_ops msm_serial_ops = {
+@@ -166,28 +155,7 @@ static void uart_dm_init(struct msm_serial_data *priv)
+ }
+ static int msm_serial_probe(struct udevice *dev)
+ {
+-	struct msm_serial_data *priv = dev_get_priv(dev);
+-	long rate;
+-
+-	/* No need to reinitialize the UART after relocation */
+-	if (gd->flags & GD_FLG_RELOC)
+-		return 0;
+-
+-	rate = msm_uart_clk_init(dev);
+-	if (rate < 0)
+-		return rate;
+-	if (!rate) {
+-		log_err("Got core clock rate of 0... Please fix your clock driver\n");
+-		return -EINVAL;
+-	}
+-
+-	/* Update the clock rate to the actual programmed rate returned by the
+-	 * clock driver
+-	 */
+-	priv->clk_rate = rate;
+-
+-	uart_dm_init(priv);
+-
++	/* Bringup: leave the UART exactly as LK left it. */
+ 	return 0;
+ }
+ 
+diff --git a/drivers/watchdog/Kconfig b/drivers/watchdog/Kconfig
+index 225e23ce24..4c4c8952c2 100644
+--- a/drivers/watchdog/Kconfig
++++ b/drivers/watchdog/Kconfig
+@@ -343,7 +343,7 @@ endif
+ 
+ config WDT_QCOM
+ 	bool "Qualcomm watchdog timer support"
+-	depends on WDT && ARCH_SNAPDRAGON
++	depends on WDT && (ARCH_SNAPDRAGON || ARCH_MSM8909)
+ 	imply WATCHDOG
+ 	help
+ 	  Select this to enable Qualcomm watchdog timer, which can be found on
+diff --git a/lib/Kconfig b/lib/Kconfig
+index e86548985d..6f8f1f08d6 100644
+--- a/lib/Kconfig
++++ b/lib/Kconfig
+@@ -1394,7 +1394,7 @@ config LMB_LIMIT_DMA_BELOW_RAM_TOP
+ 	bool
+ 	depends on LMB
+ 	default y if ARCH_BCM283X || ARCH_EXYNOS9 || ARCH_MVEBU || \
+-		     ARCH_ROCKCHIP || STARFIVE_JH7110
++		     ARCH_ROCKCHIP || ARCH_SNAPDRAGON || STARFIVE_JH7110
+ 	default y if SANDBOX
+ 	help
+ 	  Some architectures can not DMA above ram_top boundary,

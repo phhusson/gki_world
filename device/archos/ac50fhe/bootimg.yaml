@@ -1,0 +1,40 @@
+# Data for the shared boot image tool (global/tools, planned).
+#
+# The load addresses are the ones MSM8909 LK forces in project/msm8909.mk
+# (ABOOT_IGNORE_BOOT_HEADER_ADDRS).  The page size and header version are the
+# stock Qualcomm layout; the device has not been dumped yet, so re-check them
+# against the stock boot image before trusting this for anything but the dev
+# second stage.
+
+format: android-boot-v0
+pagesize: 2048
+cmdline: >-
+  console=ttyHSL0,115200,n8 androidboot.console=ttyHSL0
+  earlycon keep_bootcon ignore_loglevel
+compression: none
+avb: unknown
+
+template:
+  dump: null
+  sha256: null
+
+qcdt:
+  # Recovered from the stock LK's "Unable to find suitable device tree" log.
+  platform_id: 245
+  variant_id: 0x0901000b
+  board_hw_subtype: 9
+  soc_rev: 0x00020000
+  pmic_rev: [0, 0, 0, 0]
+
+qcom:
+  base: 0x80000000
+  kernel_offset: 0x00008000
+  ramdisk_offset: 0x02000000
+  second_offset: 0x00f00000
+  tags_offset: 0x01e00000
+
+secondstage:
+  note: >-
+    The stock LK loads a raw 32-bit payload at 0x80008000.  MSM8909 is
+    Cortex-A7 only, so the second stage must not use the ARM64 Image header.
+    `fastboot boot` is the supported development path; nothing is flashed.

@@ -1,0 +1,9 @@
+schema: 1
+kind: device
+id: device/archos/ac50fhe
+description: Archos 50f Helium (AC50FHE, MSM8909)
+requires:
+  - soc/qcom/msm8909
+maintainers:
+  - "@phhusson"
+status: wip

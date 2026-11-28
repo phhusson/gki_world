@@ -1,0 +1,13 @@
+schema: 1
+license: GPL-2.0-or-later
+sources:
+  - kind: other
+    path: device/archos/ac50fhe/harness/patches
+    derived:
+      - 0105-board-qualcomm-gkiw-ac50fhe.patch
+    note: >-
+      Original gki_world board data for the Archos 50f Helium.  The DTS is a
+      minimal U-Boot-only tree; it does not reuse the downstream vendor DTB.
+notes: >-
+  The patch applies after the global and MSM8909 SoC patches to the pinned
+  U-Boot commit in global/harness/2ndstage/uboot.conf.

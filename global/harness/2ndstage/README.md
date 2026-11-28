@@ -328,6 +328,17 @@ A SoC harness config can add to the shared build:
 | `UBOOT_PLATFORM` | default build directory suffix |
 | `GKIW_FLASH_IMAGE` | name of the wrapped boot image |
 | `GKIW_BOOTIMG_*` | header version, offsets, OS version, trailer and padding |
+| `GKIW_QCDT_*` | wrap the DTB in a QCDT v3 table for Qualcomm LK |
+
+`GKIW_QCDT_*` is for older Qualcomm LK first stages. When
+`GKIW_QCDT_PLATFORM_ID` is set, `mkbootimg.sh` appends a one-entry QCDT v3
+table after the ramdisk/second sections, sets the v0 header's last field (the
+downstream `dt_size`) to its size, and stores the DTB in it. The entry IDs
+(`GKIW_QCDT_PLATFORM_ID`, `GKIW_QCDT_VARIANT_ID`, `GKIW_QCDT_HW_SUBTYPE`,
+`GKIW_QCDT_SOC_REV`, `GKIW_QCDT_PMIC_REV_0..3`) must match what the stock LK
+reads from SMEM. `fastboot oem log` prints them in its "Unable to find suitable
+device tree" error after a deliberately mismatched table. Do not combine QCDT
+with `GKIW_BOOTIMG_APPEND_DTB=1`.
 
 `UBOOT_EXTRA_FRAGMENTS` is resolved against the repository first and then
 against the U-Boot source tree, so a phone can reuse an upstream fragment such

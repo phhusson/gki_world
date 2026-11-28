@@ -1,0 +1,463 @@
+diff --git a/arch/arm/dts/msm8909-archos-ac50fhe.dts b/arch/arm/dts/msm8909-archos-ac50fhe.dts
+new file mode 100644
+index 0000000000..cafa9fa3f3
+--- /dev/null
++++ b/arch/arm/dts/msm8909-archos-ac50fhe.dts
+@@ -0,0 +1,128 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * U-Boot dev second stage for the Archos 50f Helium (AC50FHE, MSM8909).
++ *
++ * Deliberately minimal.  LK already configured the debug UART pins, the GCC
++ * clocks and the internal SNPS Femto USB PHY before chainloading this payload.
++ * The tree therefore describes only the UART, the ChipIdea USB controller, a
++ * stub GCC provider, the APCS watchdog and the memory windows shared with the
++ * next kernel.
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/clock/qcom,gcc-msm8916.h>
++
++/ {
++	model = "Archos 50f Helium (AC50FHE)";
++	compatible = "archos,ac50fhe", "qcom,msm8909";
++
++	#address-cells = <1>;
++	#size-cells = <1>;
++
++	aliases {
++		serial0 = &blsp1_uart2;
++	};
++
++	chosen {
++		stdout-path = "serial0:115200n8";
++	};
++
++	memory@80000000 {
++		device_type = "memory";
++		reg = <0x80000000 0x80000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <1>;
++		#size-cells = <1>;
++		ranges;
++
++		/*
++		 * The Linux DT in a later boot image must reserve the same
++		 * windows with no-map.  U-Boot's usable top is pulled below
++		 * them in dram_init().
++		 */
++		ramoops@9f000000 {
++			compatible = "ramoops";
++			reg = <0x9f000000 0x100000>;
++			record-size = <0x20000>;
++			console-size = <0x60000>;
++			ftrace-size = <0x20000>;
++			pmsg-size = <0x20000>;
++			ecc-size = <16>;
++			no-map;
++		};
++
++		gkiw_log: gkiw-log@9f100000 {
++			reg = <0x9f100000 0x20000>;
++			no-map;
++		};
++	};
++
++	wdt_clk: wdt-clock {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		clock-frequency = <32768>;
++	};
++
++	soc {
++		compatible = "simple-bus";
++		#address-cells = <1>;
++		#size-cells = <1>;
++		ranges;
++
++		gcc: clock-controller@1800000 {
++			compatible = "qcom,gcc-msm8909";
++			reg = <0x1800000 0x80000>;
++			#clock-cells = <1>;
++		};
++
++		blsp1_uart2: serial@78b0000 {
++			compatible = "qcom,msm-uartdm-v1.4";
++			reg = <0x78b0000 0x200>;
++			clocks = <&gcc GCC_BLSP1_UART2_APPS_CLK>,
++				 <&gcc GCC_BLSP1_AHB_CLK>;
++			clock-names = "core", "iface";
++			/* LK programs the UART for 7.3728 MHz / 115200. */
++			clock-frequency = <7372800>;
++			bootph-all;
++			status = "okay";
++		};
++
++		/*
++		 * U-Boot's ci_udc/ehci-msm pair drives the ChipIdea core.  No
++		 * PHY phandle: the Femto PHY at 0x6c000 is inherited from LK and
++		 * this loader only resets the controller and switches it to
++		 * device mode.
++		 */
++		usb: usb@78d9000 {
++			compatible = "qcom,ci-hdrc";
++			reg = <0x78d9000 0x200>, <0x78d9200 0x200>;
++			clocks = <&gcc GCC_USB_HS_AHB_CLK>,
++				 <&gcc GCC_USB_HS_SYSTEM_CLK>;
++			clock-names = "iface", "core";
++			dr_mode = "peripheral";
++			phy_type = "ulpi";
++			phys = <&usb_hs_phy>;
++			phy-names = "usb-phy";
++			bootph-all;
++			status = "okay";
++
++			ulpi {
++				usb_hs_phy: phy {
++					compatible = "qcom,usb-hs-phy-msm8916";
++					#phy-cells = <0>;
++				};
++			};
++		};
++
++
++		wdt: watchdog@b017000 {
++			compatible = "qcom,kpss-wdt";
++			reg = <0xb017000 0x1000>;
++			clocks = <&wdt_clk>;
++			status = "okay";
++		};
++	};
++};
+diff --git a/board/qualcomm/gkiw-msm8909/Makefile b/board/qualcomm/gkiw-msm8909/Makefile
+new file mode 100644
+index 0000000000..e21bdf6089
+--- /dev/null
++++ b/board/qualcomm/gkiw-msm8909/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0+
++obj-y += gkiw-msm8909.o
+diff --git a/board/qualcomm/gkiw-msm8909/gkiw-msm8909.c b/board/qualcomm/gkiw-msm8909/gkiw-msm8909.c
+new file mode 100644
+index 0000000000..c8116171cd
+--- /dev/null
++++ b/board/qualcomm/gkiw-msm8909/gkiw-msm8909.c
+@@ -0,0 +1,236 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * gki_world development second stage for the Archos 50f Helium (MSM8909).
++ */
++
++#include <asm/io.h>
++#include <asm/ptrace.h>
++#include <env.h>
++#include <g_dnl.h>
++#include <fastboot.h>
++#include <init.h>
++#include <lmb.h>
++#include <log.h>
++#include <linux/bitops.h>
++#include <linux/sizes.h>
++#include <time.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++#define QCOM_IMEM_RESTART_REASON	0x0860065c
++#define QCOM_RESTART_BOOTLOADER		0x77665500
++#define QCOM_RESTART_RECOVERY		0x77665502
++
++#define GKIW_DRAM_BASE			0x80000000
++#define GKIW_PSTORE_ADDR		0x9f000000
++
++#define QCOM_WDT_BASE			0xb017000
++#define QCOM_WDT_RST			0x04
++#define QCOM_WDT_EN			0x08
++#define QCOM_WDT_BARK_TIME		0x10
++#define QCOM_WDT_BITE_TIME		0x14
++
++/*
++ * GCC (global clock controller) USB clocks.  Offsets match the MSM8916
++ * compatible block; MSM8909 only differs in where GPLL0 reports lock.
++ */
++#define QCOM_GCC_BASE			0x1800000
++#define QCOM_GCC_GPLL0_VOTE		0x45000
++#define QCOM_GCC_GPLL0_STATUS		0x2101c
++#define QCOM_GCC_GPLL0_LOCKED		BIT(17)
++#define QCOM_GCC_USB_HS_BCR		0x41000
++#define QCOM_GCC_USB_HS_SYSTEM_CBCR	0x41004
++#define QCOM_GCC_USB_HS_AHB_CBCR	0x41008
++#define QCOM_GCC_USB_HS_SYSTEM_RCGR	0x41010
++#define QCOM_GCC_USB2A_PHY_BCR		0x41028
++#define QCOM_GCC_USB2A_PHY_SLEEP_CBCR	0x4102c
++
++#define QCOM_RCG_CFG_REG		0x4
++#define QCOM_RCG_M_REG			0x8
++#define QCOM_RCG_N_REG			0xc
++#define QCOM_RCG_D_REG			0x10
++#define QCOM_RCG_UPDATE			BIT(0)
++#define QCOM_CFG_SRC_GPLL0		(1 << 8)
++#define QCOM_CFG_SRC_SEL_MASK		(7 << 8)
++#define QCOM_CFG_MODE_MASK		(3 << 12)
++#define QCOM_CFG_HW_CTRL		BIT(20)
++#define QCOM_CFG_DIV_MASK		0x1f
++
++void gkiw_wdt_arm_early(unsigned int seconds);
++
++static void gkiw_wdt_disarm(void)
++{
++	writel(0, (void __iomem *)QCOM_WDT_BASE + QCOM_WDT_EN);
++}
++
++static void gkiw_delay_us(unsigned int us)
++{
++	unsigned long start = timer_get_us();
++
++	while (timer_get_us() - start < us)
++		;
++}
++
++/*
++ * LK jumps to `fastboot boot` payloads with its USB clocks and PHY still
++ * running, but runs target_usb_exit() before a normal boot from a flashed
++ * image.  The restart reason is the reliable difference between the two.
++ */
++static bool gkiw_usb_left_running(void)
++{
++	void __iomem *reason = (void __iomem *)QCOM_IMEM_RESTART_REASON;
++
++	return readl(reason) == QCOM_RESTART_BOOTLOADER;
++}
++
++void gkiw_wdt_arm_early(unsigned int seconds)
++{
++	void __iomem *wdt = (void __iomem *)QCOM_WDT_BASE;
++	u32 ticks = seconds * 32768;
++
++	writel(0, wdt + QCOM_WDT_EN);
++	writel(1, wdt + QCOM_WDT_RST);
++	writel(ticks - 32768, wdt + QCOM_WDT_BARK_TIME);
++	writel(ticks, wdt + QCOM_WDT_BITE_TIME);
++	writel(1, wdt + QCOM_WDT_EN);
++}
++
++int gkiw_usb_clock_init(void)
++{
++	void __iomem *gcc = (void __iomem *)QCOM_GCC_BASE;
++	u32 cfg;
++	int i;
++
++	if (gkiw_usb_left_running())
++		return 0;
++
++	/* GPLL0 has to be locked before its children can run. */
++	setbits_le32(gcc + QCOM_GCC_GPLL0_VOTE, BIT(0));
++	for (i = 0; i < 1000; i++) {
++		if (readl(gcc + QCOM_GCC_GPLL0_STATUS) & QCOM_GCC_GPLL0_LOCKED)
++			break;
++		gkiw_delay_us(10);
++	}
++
++	/* USB HS system clock: GPLL0 / 10 = 80 MHz. */
++	writel(0, gcc + QCOM_GCC_USB_HS_SYSTEM_RCGR + QCOM_RCG_M_REG);
++	writel(0, gcc + QCOM_GCC_USB_HS_SYSTEM_RCGR + QCOM_RCG_N_REG);
++	writel(0, gcc + QCOM_GCC_USB_HS_SYSTEM_RCGR + QCOM_RCG_D_REG);
++	cfg = readl(gcc + QCOM_GCC_USB_HS_SYSTEM_RCGR + QCOM_RCG_CFG_REG);
++	cfg &= ~(QCOM_CFG_SRC_SEL_MASK | QCOM_CFG_MODE_MASK |
++		 QCOM_CFG_HW_CTRL | QCOM_CFG_DIV_MASK);
++	cfg |= QCOM_CFG_SRC_GPLL0 | 10;
++	writel(cfg, gcc + QCOM_GCC_USB_HS_SYSTEM_RCGR + QCOM_RCG_CFG_REG);
++	setbits_le32(gcc + QCOM_GCC_USB_HS_SYSTEM_RCGR, QCOM_RCG_UPDATE);
++	for (i = 0; i < 1000; i++) {
++		if (!(readl(gcc + QCOM_GCC_USB_HS_SYSTEM_RCGR) &
++		      QCOM_RCG_UPDATE))
++			break;
++		gkiw_delay_us(10);
++	}
++
++	/* USB HS AHB/system and the USB2A PHY sleep clock. */
++	setbits_le32(gcc + QCOM_GCC_USB_HS_AHB_CBCR, BIT(0));
++	setbits_le32(gcc + QCOM_GCC_USB_HS_SYSTEM_CBCR, BIT(0));
++	setbits_le32(gcc + QCOM_GCC_USB2A_PHY_SLEEP_CBCR, BIT(0));
++
++	/* Bring the controller and the ULPI PHY out of reset. */
++	setbits_le32(gcc + QCOM_GCC_USB_HS_BCR, BIT(0));
++	setbits_le32(gcc + QCOM_GCC_USB2A_PHY_BCR, BIT(0));
++	gkiw_delay_us(1000);
++	clrbits_le32(gcc + QCOM_GCC_USB_HS_BCR, BIT(0));
++	clrbits_le32(gcc + QCOM_GCC_USB2A_PHY_BCR, BIT(0));
++	gkiw_delay_us(1000);
++
++	return 0;
++}
++
++int arch_cpu_init(void)
++{
++	gkiw_wdt_arm_early(25);
++	return 0;
++}
++
++int mach_cpu_init(void)
++{
++	return 0;
++}
++
++int board_early_init_f(void)
++{
++	return 0;
++}
++
++int board_init(void)
++{
++	return 0;
++}
++
++int dram_init(void)
++{
++	gd->ram_base = GKIW_DRAM_BASE;
++	gd->ram_size = GKIW_PSTORE_ADDR - GKIW_DRAM_BASE;
++	return 0;
++}
++
++int dram_init_banksize(void)
++{
++	gd->dram[0].start = GKIW_DRAM_BASE;
++	gd->dram[0].size = GKIW_PSTORE_ADDR - GKIW_DRAM_BASE;
++	return 0;
++}
++
++int board_late_init(void)
++{
++	gkiw_usb_clock_init();
++
++#if CONFIG_IS_ENABLED(FASTBOOT)
++	phys_addr_t addr = CONFIG_FASTBOOT_BUF_ADDR;
++
++	if (lmb_alloc_mem(LMB_MEM_ALLOC_ADDR, 0, &addr,
++			  CONFIG_FASTBOOT_BUF_SIZE, LMB_NONE)) {
++		log_err("%s: cannot reserve fastboot buffer\n", __func__);
++		return 0;
++	}
++	env_set_hex("fastboot_addr_r", addr);
++	env_set_hex("loadaddr", addr);
++#endif
++	/*
++	 * Early boot is over and the USB gadget is about to take over; an
++	 * unattended APCS watchdog would reset the board mid-fastboot.
++	 */
++	gkiw_wdt_disarm();
++	return 0;
++}
++
++/*
++ * The generic implementation returns -EOPNOTSUPP, which fastboot interprets
++ * as "no cable" and immediately unregisters the gadget.  This board is a
++ * development target always reached over USB.
++ */
++int g_dnl_board_usb_cable_connected(void)
++{
++	return 1;
++}
++
++int fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
++{
++	void __iomem *restart_reason = (void __iomem *)QCOM_IMEM_RESTART_REASON;
++	u32 value;
++
++	switch (reason) {
++	case FASTBOOT_REBOOT_REASON_BOOTLOADER:
++	case FASTBOOT_REBOOT_REASON_FASTBOOTD:
++		value = QCOM_RESTART_BOOTLOADER;
++		break;
++	case FASTBOOT_REBOOT_REASON_RECOVERY:
++		value = QCOM_RESTART_RECOVERY;
++		break;
++	default:
++		return 0;
++	}
++
++	writel(value, restart_reason);
++	readl(restart_reason);
++	return 0;
++}
+diff --git a/board/qualcomm/gkiw-msm8909/gkiw-msm8909.env b/board/qualcomm/gkiw-msm8909/gkiw-msm8909.env
+new file mode 100644
+index 0000000000..e0a1b9ced9
+--- /dev/null
++++ b/board/qualcomm/gkiw-msm8909/gkiw-msm8909.env
+@@ -0,0 +1,11 @@
++stdin=serial
++stdout=serial
++stderr=serial
++
++bootdelay=1
++bootretry=-1
++bootcmd=fastboot usb 0
++
++fastbootcmd=echo "Fastboot Mode"; fastboot usb 0
++serial#=ac50fhe
++
+diff --git a/configs/gkiw-msm8909_defconfig b/configs/gkiw-msm8909_defconfig
+new file mode 100644
+index 0000000000..46666dc3e3
+--- /dev/null
++++ b/configs/gkiw-msm8909_defconfig
+@@ -0,0 +1,35 @@
++CONFIG_ARM=y
++CONFIG_ARCH_MSM8909=y
++CONFIG_TEXT_BASE=0x80008000
++CONFIG_HAS_CUSTOM_SYS_INIT_SP_ADDR=y
++CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x8007fff0
++CONFIG_SYS_MALLOC_LEN=0x01000000
++CONFIG_SYS_MALLOC_F_LEN=0x00010000
++CONFIG_SYS_LOAD_ADDR=0x90000000
++CONFIG_SYS_VENDOR="qualcomm"
++CONFIG_SYS_BOARD="gkiw-msm8909"
++CONFIG_SYS_SOC="msm8909"
++CONFIG_SYS_CONFIG_NAME="gkiw-msm8909"
++CONFIG_DEFAULT_DEVICE_TREE="msm8909-archos-ac50fhe"
++CONFIG_OF_CONTROL=y
++CONFIG_OF_SEPARATE=y
++CONFIG_DM=y
++CONFIG_DM_SERIAL=y
++CONFIG_MSM_SERIAL=y
++CONFIG_CLK=y
++CONFIG_CLK_STUB=y
++CONFIG_SYS_ARCH_TIMER=y
++CONFIG_LMB=y
++CONFIG_BOARD_LATE_INIT=y
++CONFIG_SYSRESET=y
++CONFIG_ENV_IS_NOWHERE=y
++CONFIG_ENV_SIZE=0x2000
++CONFIG_BAUDRATE=115200
++CONFIG_BOOTDELAY=1
++CONFIG_USE_BOOTCOMMAND=y
++CONFIG_BOOTCOMMAND="fastboot usb 0"
++CONFIG_CMD_BOOTM=y
++CONFIG_ANDROID_BOOT_IMAGE=y
++# CONFIG_DISPLAY_CPUINFO is not set
++CONFIG_SYS_DCACHE_OFF=y
++CONFIG_SYS_ICACHE_OFF=y
+diff --git a/include/configs/gkiw-msm8909.h b/include/configs/gkiw-msm8909.h
+new file mode 100644
+index 0000000000..2f7dd42f7a
+--- /dev/null
++++ b/include/configs/gkiw-msm8909.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Archos 50f Helium (MSM8909) dev second stage.
++ *
++ * LK leaves the ARM generic timer running at 19.2 MHz; do not trust CNTFRQ,
++ * which the stock firmware does not program on this SoC.
++ */
++
++#ifndef __CONFIG_GKIW_MSM8909_H
++#define __CONFIG_GKIW_MSM8909_H
++
++#define CFG_SYS_BAUDRATE_TABLE	{ 115200, 230400, 460800, 921600 }
++#define CFG_SYS_HZ_CLOCK	19200000
++
++#endif /* __CONFIG_GKIW_MSM8909_H */

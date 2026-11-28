@@ -1,0 +1,15 @@
+schema: 1
+license: GPL-2.0-or-later
+sources:
+  - kind: other
+    path: soc/qcom/msm8909/harness/patches
+    derived:
+      - 0101-arm-msm8909-support.patch
+    note: >-
+      Original gki_world work for the MSM8909 dev second stage.  The patch adds
+      an ARMv7 machine (the SoC has no AArch64 mode, unlike U-Boot's existing
+      ARCH_SNAPDRAGON targets), binds the MSM8909 GCC to the existing stub clock
+      provider, and makes the existing Snapdragon LMB ceiling apply here.
+notes: >-
+  The patch applies after the global gkiw patches to the pinned U-Boot commit
+  in global/harness/2ndstage/uboot.conf.

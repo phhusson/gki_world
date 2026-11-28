@@ -216,6 +216,77 @@ restore(28, 24, "GKIW_BOOTIMG_SECOND_OFFSET")
 open(path, "wb").write(data)
 PYPATCH
 
+# Qualcomm LK can also take the device tree from a QCDT table inside the boot
+# image (the old dt_size section), instead of an appended DTB.  The entry has
+# to match the board IDs the stock LK reads from SMEM.  This is optional and
+# only used when the target config provides the IDs.
+if [ -n "${GKIW_QCDT_PLATFORM_ID:-}" ]; then
+	[ -n "$DTB" ] && [ -f "$DTB" ] || {
+		echo "mkbootimg: missing QCDT DTB" >&2
+		exit 1
+	}
+	python3 - "$OUTPUT" "$DTB" <<'PYQCDT'
+import os
+import struct
+import sys
+
+path, dtb_path = sys.argv[1], sys.argv[2]
+data = bytearray(open(path, "rb").read())
+if data[:8] != b"ANDROID!":
+    sys.exit("mkbootimg: not an Android image")
+
+(_, kernel_size, _, ramdisk_size, _, second_size, _, _, page_size,
+ _) = struct.unpack_from("<8s9I", data, 0)
+page_size = page_size or 2048
+
+def roundup(value, align):
+    return (value + align - 1) // align * align
+
+dtb = open(dtb_path, "rb").read()
+dtb_offset = 0x100
+table = bytearray(max(roundup(dtb_offset + len(dtb), page_size), page_size))
+
+def env_u32(name, default=0):
+    return int(os.environ.get(name, default), 0)
+
+pmic = [env_u32("GKIW_QCDT_PMIC_REV_%d" % i) for i in range(4)]
+struct.pack_into(
+    "<III", table, 0,
+    0x54444351,  # "QCDT"
+    3,           # DEV_TREE_VERSION_V3
+    1,
+)
+struct.pack_into(
+    "<10I", table, 12,
+    env_u32("GKIW_QCDT_PLATFORM_ID"),
+    env_u32("GKIW_QCDT_VARIANT_ID"),
+    env_u32("GKIW_QCDT_HW_SUBTYPE"),
+    env_u32("GKIW_QCDT_SOC_REV"),
+    *pmic,
+    dtb_offset,
+    len(dtb),
+)
+table[dtb_offset:dtb_offset + len(dtb)] = dtb
+
+# The table starts after the kernel/ramdisk/second sections.
+dt_image_offset = (
+    page_size
+    + roundup(kernel_size, page_size)
+    + roundup(ramdisk_size, page_size)
+    + roundup(second_size, page_size)
+)
+if len(data) > dt_image_offset:
+    sys.exit("mkbootimg: image has data after the second section")
+data.extend(b"\0" * (dt_image_offset - len(data)))
+data.extend(table)
+
+# Header v0's last field is dt_size on Qualcomm LK.  It points at the QCDT
+# table and also makes LK use copy_dtb() instead of dev_tree_appended().
+struct.pack_into("<I", data, 0x28, len(table))
+open(path, "wb").write(data)
+PYQCDT
+fi
+
 if [ -n "$GKIW_BOOTIMG_TRAILER" ]; then
 	printf '%s' "$GKIW_BOOTIMG_TRAILER" >> "$OUTPUT"
 fi
