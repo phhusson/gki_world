@@ -220,11 +220,11 @@ static void fb_test_pattern(void)
 	struct fb_fix_screeninfo fix;
 	struct fb_var_screeninfo var;
 	static const unsigned int colors[] = {
-		0xffffffff, 0xffffff00, 0xff00ffff, 0xff00ff00,
-		0xffff00ff, 0xffff0000, 0xff0000ff, 0xff000000,
+		0xffffff, 0xffff00, 0x00ffff, 0x00ff00,
+		0xff00ff, 0xff0000, 0x0000ff, 0x000000,
 	};
 	unsigned char *fb;
-	int fd, x, y;
+	int fd, x, y, bytes;
 
 	fd = open("/dev/fb0", O_RDWR);
 	if (fd < 0)
@@ -240,11 +240,28 @@ static void fb_test_pattern(void)
 		return;
 	}
 
+	bytes = var.bits_per_pixel / 8;
 	for (y = 0; y < var.yres; y++) {
-		unsigned int *line = (unsigned int *)(fb + y * fix.line_length);
+		unsigned char *line = fb + y * fix.line_length;
 
-		for (x = 0; x < var.xres; x++)
-			line[x] = colors[x * (sizeof(colors) / sizeof(colors[0])) / var.xres];
+		for (x = 0; x < var.xres; x++) {
+			unsigned int c =
+				colors[x * (sizeof(colors) / sizeof(colors[0])) /
+				       var.xres];
+
+			if (bytes == 2) {
+				unsigned short p = ((c >> 19) & 0x1f) << 11 |
+						   ((c >> 10) & 0x3f) << 5 |
+						   ((c >> 3) & 0x1f);
+				((unsigned short *)line)[x] = p;
+			} else if (bytes == 3) {
+				line[x * 3 + 0] = c >> 16;
+				line[x * 3 + 1] = c >> 8;
+				line[x * 3 + 2] = c;
+			} else if (bytes == 4) {
+				((unsigned int *)line)[x] = 0xff000000 | c;
+			}
+		}
 	}
 
 	munmap(fb, fix.smem_len);

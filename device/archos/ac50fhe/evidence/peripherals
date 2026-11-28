@@ -62,3 +62,17 @@ backlight brightness = 255
 The initial 0x83201000 guess was zero; scanning the stock splash region showed
 LK's framebuffer at 0x83300000 (opaque black/gray pixels).  The initramfs fills
 `/dev/fb0` with colour bars so the panel visibly shows the framebuffer.
+
+MDP3 DRM/KMS driver (takes over LK's 720x1280 RGB888 scanout):
+
+```text
+[drm] Initialized mdp3 1.0.0 for 1a00000.display-controller on minor 0
+mdp3-drm 1a00000.display-controller: [drm] fb0: mdp3drmfb frame buffer device
+MDP3 primary DMA source = 0x98100000 (CMA buffer)
+MDP3 size               = 0x050002d0 (720x1280)
+MDP3 stride             = 0x00000870 (2160 = 720 * 3, RGB888)
+gkiw: framebuffer test pattern drawn
+```
+
+The bootloader-left pipeline is reused; page flips are writes to the primary
+DMA address and the fbcon renders on the panel.

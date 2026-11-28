@@ -43,14 +43,15 @@ phone resets about 60 s after every boot.
 
 ## Known gaps
 
-* **Display**: the stock kernel uses `qcom,mdss_mdp3` (MDP3), which mainline
-  DRM does not implement. What works is a `simple-framebuffer` at LK's
-  framebuffer address (`0x83300000`, 720x1280, RGBA8888) with the MDSS clocks
-  and GDSC held on, plus the PM8909 LPG PWM backlight (`qcom,pm8916-pwm` and
-  `pwm-backlight`). The panel/DSI/MDP3 scanout must have been left running by
-  LK; there is no modesetting, GPU or brightness policy beyond the PWM. The
-  initramfs draws colour bars on `/dev/fb0` after boot as a visible check.
-  Real DRM/KMS (MDP3) remains a large future project.
+* **Display**: a real MDP3 DRM/KMS driver (`patches/0004-mdp3-drm.patch`)
+  takes over the primary DMA that the bootloader left running.  It exposes a
+  fixed 720x1280 RGB888 CRTC/plane and a DPI connector, allocates dumb buffers
+  from CMA and page-flips by writing the buffer address to the MDP3 primary
+  DMA (register `0x90008`).  The MDSS clocks/GDSC are held on and the PM8909
+  LPG PWM backlight is enabled, so the fbcon and `/dev/fb0` draw on the panel
+  and the initramfs colour bars are visible.  The DSI controller, PHY and panel
+  initialisation are still done by LK; user-triggered modesetting is future
+  work.
 * **Audio/microphone**: the stock card is `msm8909-skue-snd-card` with the
   internal "tombak" codec and the PM8909 WCD analog block at SPMI `0xf000`
   (`qcom,msm8x16_wcd_codec`). The MSM8909 LPASS/tombak digital side is not

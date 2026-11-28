@@ -25,32 +25,6 @@
 		default-brightness-level = <255>;
 	};
 
-	chosen {
-		#address-cells = <1>;
-		#size-cells = <1>;
-		ranges;
-
-		/* LK leaves the DSI panel and MDP3 scanout running. */
-		framebuffer@83201000 {
-			compatible = "simple-framebuffer";
-			reg = <0x83300000 (720 * 1280 * 4)>;
-
-			width = <720>;
-			height = <1280>;
-			stride = <(720 * 4)>;
-			format = "a8r8g8b8";
-
-			power-domains = <&gcc MDSS_GDSC>;
-
-			clocks = <&gcc GCC_MDSS_AHB_CLK>,
-				 <&gcc GCC_MDSS_AXI_CLK>,
-				 <&gcc GCC_MDSS_VSYNC_CLK>,
-				 <&gcc GCC_MDSS_MDP_CLK>,
-				 <&gcc GCC_MDSS_BYTE0_CLK>,
-				 <&gcc GCC_MDSS_PCLK0_CLK>,
-				 <&gcc GCC_MDSS_ESC0_CLK>;
-		};
-	};
 };
 
 &{/reserved-memory} {
@@ -68,11 +42,6 @@
 	/* Mapped and reserved: the initramfs writes boot-progress markers here. */
 	gkiw_marker@9c000000 {
 		reg = <0x9c000000 0x1000>;
-	};
-
-	framebuffer@83201000 {
-		reg = <0x83300000 (720 * 1280 * 4)>;
-		no-map;
 	};
 };
 
@@ -115,6 +84,26 @@
 
 &pm8909_pwm {
 	status = "okay";
+};
+
+&soc {
+	mdp3: display-controller@1a00000 {
+		compatible = "qcom,msm8909-mdp3";
+		reg = <0x1a00000 0x100000>;
+		interrupts = <GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>;
+
+		clocks = <&gcc GCC_MDSS_AHB_CLK>,
+			 <&gcc GCC_MDSS_AXI_CLK>,
+			 <&gcc GCC_MDSS_VSYNC_CLK>,
+			 <&gcc GCC_MDSS_MDP_CLK>,
+			 <&gcc GCC_MDSS_BYTE0_CLK>,
+			 <&gcc GCC_MDSS_PCLK0_CLK>,
+			 <&gcc GCC_MDSS_ESC0_CLK>;
+		clock-names = "ahb", "axi", "vsync", "mdp", "byte0", "pclk0", "esc0";
+
+		power-domains = <&gcc MDSS_GDSC>;
+		status = "okay";
+	};
 };
 
 / {

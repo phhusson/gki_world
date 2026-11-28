@@ -1,0 +1,296 @@
+diff --git a/drivers/gpu/drm/Kconfig b/drivers/gpu/drm/Kconfig
+index 7e6bc0b3a..08eaa972a 100644
+--- a/drivers/gpu/drm/Kconfig
++++ b/drivers/gpu/drm/Kconfig
+@@ -364,6 +364,8 @@ source "drivers/gpu/drm/tiny/Kconfig"
+ 
+ source "drivers/gpu/drm/pl111/Kconfig"
+ 
++source "drivers/gpu/drm/mdp3/Kconfig"
++
+ source "drivers/gpu/drm/tve200/Kconfig"
+ 
+ source "drivers/gpu/drm/xen/Kconfig"
+diff --git a/drivers/gpu/drm/Makefile b/drivers/gpu/drm/Makefile
+index da2565e6d..76a16abef 100644
+--- a/drivers/gpu/drm/Makefile
++++ b/drivers/gpu/drm/Makefile
+@@ -213,6 +213,7 @@ obj-y			+= mxsfb/
+ obj-y			+= sysfb/
+ obj-y			+= tiny/
+ obj-$(CONFIG_DRM_PL111) += pl111/
++obj-$(CONFIG_DRM_MDP3) += mdp3/
+ obj-$(CONFIG_DRM_TVE200) += tve200/
+ obj-$(CONFIG_DRM_ADP) += adp/
+ obj-$(CONFIG_DRM_XEN) += xen/
+diff --git a/drivers/gpu/drm/mdp3/Kconfig b/drivers/gpu/drm/mdp3/Kconfig
+new file mode 100644
+index 000000000..af1ab0277
+--- /dev/null
++++ b/drivers/gpu/drm/mdp3/Kconfig
+@@ -0,0 +1,13 @@
++# SPDX-License-Identifier: GPL-2.0-only
++config DRM_MDP3
++	tristate "Qualcomm MDP3 display controller"
++	depends on DRM && OF && COMMON_CLK
++	select DRM_KMS_HELPER
++	select DRM_GEM_DMA_HELPER
++	help
++	  DRM/KMS driver for the Qualcomm MDP3 display controller found on
++	  MSM8909.  It takes over the primary DMA programmed by the bootloader
++	  and supports dumb buffers and page flips on the fixed panel mode.
++
++	  The DSI controller, PHY and panel are still set up by the bootloader;
++	  this driver does not implement modesetting yet.
+diff --git a/drivers/gpu/drm/mdp3/Makefile b/drivers/gpu/drm/mdp3/Makefile
+new file mode 100644
+index 000000000..ad9b77f8c
+--- /dev/null
++++ b/drivers/gpu/drm/mdp3/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0-only
++obj-$(CONFIG_DRM_MDP3) += mdp3_drm.o
+diff --git a/drivers/gpu/drm/mdp3/mdp3_drm.c b/drivers/gpu/drm/mdp3/mdp3_drm.c
+new file mode 100644
+index 000000000..bbb891640
+--- /dev/null
++++ b/drivers/gpu/drm/mdp3/mdp3_drm.c
+@@ -0,0 +1,238 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Qualcomm MDP3 display controller (MSM8909).
++ *
++ * The second stage leaves the DSI panel and the MDP3 video pipeline running,
++ * so this driver takes over the primary DMA: a page flip is a write to
++ * MDP3_REG_DMA_P_IBUF_ADDR and the hardware double-buffers it at vsync.  The
++ * mode (720x1280, RGB888, 2160-byte stride) must match what the bootloader
++ * programmed.  DSI/PHY/panel modesetting is still done by the bootloader.
++ */
++
++#include <linux/clk.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++
++#include <drm/clients/drm_client_setup.h>
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_connector.h>
++#include <drm/drm_drv.h>
++#include <drm/drm_fb_dma_helper.h>
++#include <drm/drm_fourcc.h>
++#include <drm/drm_fbdev_dma.h>
++#include <drm/drm_gem_dma_helper.h>
++#include <drm/drm_gem_framebuffer_helper.h>
++#include <drm/drm_mode_config.h>
++#include <drm/drm_modes.h>
++#include <drm/drm_probe_helper.h>
++#include <drm/drm_simple_kms_helper.h>
++
++#define MDP3_REG_DMA_P_IBUF_ADDR	0x90008
++
++#define MDP3_WIDTH			720
++#define MDP3_HEIGHT			1280
++
++struct mdp3_drm {
++	struct drm_device drm;
++	void __iomem *base;
++	struct clk_bulk_data *clks;
++	int num_clks;
++	struct drm_simple_display_pipe pipe;
++	struct drm_connector connector;
++};
++
++static const struct drm_display_mode mdp3_mode = {
++	.clock = 67800,
++	.hdisplay = MDP3_WIDTH,
++	.hsync_start = MDP3_WIDTH + 64,
++	.hsync_end = MDP3_WIDTH + 64 + 8,
++	.htotal = MDP3_WIDTH + 64 + 8 + 64,
++	.vdisplay = MDP3_HEIGHT,
++	.vsync_start = MDP3_HEIGHT + 20,
++	.vsync_end = MDP3_HEIGHT + 20 + 4,
++	.vtotal = MDP3_HEIGHT + 20 + 4 + 16,
++	.width_mm = 62,
++	.height_mm = 110,
++	.type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
++};
++
++static void mdp3_pipe_update(struct drm_simple_display_pipe *pipe,
++			     struct drm_plane_state *old_state)
++{
++	struct mdp3_drm *mdp3 = container_of(pipe, struct mdp3_drm, pipe);
++	struct drm_plane_state *state = pipe->plane.state;
++	struct drm_framebuffer *fb = state->fb;
++	dma_addr_t addr;
++
++	if (!fb)
++		return;
++
++	addr = drm_fb_dma_get_gem_addr(fb, state, 0);
++	writel((u32)addr, mdp3->base + MDP3_REG_DMA_P_IBUF_ADDR);
++}
++
++static void mdp3_pipe_enable(struct drm_simple_display_pipe *pipe,
++			     struct drm_crtc_state *crtc_state,
++			     struct drm_plane_state *plane_state)
++{
++	mdp3_pipe_update(pipe, NULL);
++}
++
++static int mdp3_pipe_mode_valid(struct drm_simple_display_pipe *pipe,
++				const struct drm_display_mode *mode)
++{
++	if (mode->hdisplay != MDP3_WIDTH || mode->vdisplay != MDP3_HEIGHT)
++		return MODE_BAD;
++	return MODE_OK;
++}
++
++static const struct drm_simple_display_pipe_funcs mdp3_pipe_funcs = {
++	.mode_valid = mdp3_pipe_mode_valid,
++	.enable = mdp3_pipe_enable,
++	.update = mdp3_pipe_update,
++};
++
++static const u32 mdp3_formats[] = {
++	DRM_FORMAT_RGB888,
++};
++
++static int mdp3_connector_get_modes(struct drm_connector *connector)
++{
++	struct drm_display_mode *mode;
++
++	mode = drm_mode_duplicate(connector->dev, &mdp3_mode);
++	if (!mode)
++		return -ENOMEM;
++
++	drm_mode_set_name(mode);
++	drm_mode_probed_add(connector, mode);
++
++	return 1;
++}
++
++static const struct drm_connector_helper_funcs mdp3_connector_helper_funcs = {
++	.get_modes = mdp3_connector_get_modes,
++};
++
++static const struct drm_connector_funcs mdp3_connector_funcs = {
++	.reset = drm_atomic_helper_connector_reset,
++	.fill_modes = drm_helper_probe_single_connector_modes,
++	.destroy = drm_connector_cleanup,
++	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
++};
++
++DEFINE_DRM_GEM_DMA_FOPS(mdp3_fops);
++
++static const struct drm_driver mdp3_driver = {
++	.driver_features = DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
++	.fops = &mdp3_fops,
++	DRM_GEM_DMA_DRIVER_OPS_VMAP,
++	DRM_FBDEV_DMA_DRIVER_OPS,
++	.name = "mdp3",
++	.desc = "Qualcomm MDP3 display controller",
++	.major = 1,
++	.minor = 0,
++};
++
++static const struct drm_mode_config_funcs mdp3_mode_config_funcs = {
++	.fb_create = drm_gem_fb_create,
++	.atomic_check = drm_atomic_helper_check,
++	.atomic_commit = drm_atomic_helper_commit,
++};
++
++static int mdp3_probe(struct platform_device *pdev)
++{
++	struct mdp3_drm *mdp3;
++	struct drm_device *drm;
++	int ret;
++
++	mdp3 = devm_drm_dev_alloc(&pdev->dev, &mdp3_driver,
++				  struct mdp3_drm, drm);
++	if (IS_ERR(mdp3))
++		return PTR_ERR(mdp3);
++	drm = &mdp3->drm;
++
++	mdp3->base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(mdp3->base))
++		return PTR_ERR(mdp3->base);
++
++	ret = devm_clk_bulk_get_all(&pdev->dev, &mdp3->clks);
++	if (ret < 0)
++		return dev_err_probe(&pdev->dev, ret, "failed to get clocks\n");
++	mdp3->num_clks = ret;
++
++	ret = clk_bulk_prepare_enable(mdp3->num_clks, mdp3->clks);
++	if (ret)
++		return ret;
++
++	devm_pm_runtime_enable(&pdev->dev);
++	ret = pm_runtime_get_sync(&pdev->dev);
++	if (ret < 0)
++		return ret;
++
++	ret = drmm_mode_config_init(drm);
++	if (ret)
++		return ret;
++	drm->mode_config.funcs = &mdp3_mode_config_funcs;
++	drm->mode_config.min_width = MDP3_WIDTH;
++	drm->mode_config.max_width = MDP3_WIDTH;
++	drm->mode_config.min_height = MDP3_HEIGHT;
++	drm->mode_config.max_height = MDP3_HEIGHT;
++	drm->mode_config.preferred_depth = 24;
++	drm->mode_config.prefer_shadow = false;
++
++	ret = drm_connector_init(drm, &mdp3->connector, &mdp3_connector_funcs,
++				 DRM_MODE_CONNECTOR_DPI);
++	if (ret)
++		return ret;
++	drm_connector_helper_add(&mdp3->connector,
++				 &mdp3_connector_helper_funcs);
++
++	ret = drm_simple_display_pipe_init(drm, &mdp3->pipe, &mdp3_pipe_funcs,
++					   mdp3_formats,
++					   ARRAY_SIZE(mdp3_formats),
++					   NULL, &mdp3->connector);
++	if (ret)
++		return ret;
++
++	drm_mode_config_reset(drm);
++
++	ret = drm_dev_register(drm, 0);
++	if (ret)
++		return ret;
++
++	platform_set_drvdata(pdev, drm);
++	drm_client_setup(drm, drm_format_info(DRM_FORMAT_RGB888));
++
++	return 0;
++}
++
++static void mdp3_remove(struct platform_device *pdev)
++{
++	struct drm_device *drm = platform_get_drvdata(pdev);
++
++	drm_dev_unplug(drm);
++	drm_atomic_helper_shutdown(drm);
++}
++
++static const struct of_device_id mdp3_of_match[] = {
++	{ .compatible = "qcom,msm8909-mdp3" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, mdp3_of_match);
++
++static struct platform_driver mdp3_platform_driver = {
++	.probe = mdp3_probe,
++	.remove = mdp3_remove,
++	.driver = {
++		.name = "mdp3-drm",
++		.of_match_table = mdp3_of_match,
++	},
++};
++module_platform_driver(mdp3_platform_driver);
++
++MODULE_DESCRIPTION("Qualcomm MDP3 display controller");
++MODULE_LICENSE("GPL");
