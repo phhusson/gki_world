@@ -43,13 +43,22 @@ phone resets about 60 s after every boot.
 
 ## Known gaps
 
-* **Display**: the stock kernel uses `qcom,mdss_mdp3` (MDP3) with an RM68191
-  QHD DSI panel. Mainline DRM has MDP4/MDP5/DPU1 but no MDP3, so a display
-  driver would be a large new subsystem rather than a DT change.
+* **Display**: the stock kernel uses `qcom,mdss_mdp3` (MDP3). Mainline DRM has
+  MDP4/MDP5/DPU1 but no MDP3, so real modesetting is a large new subsystem.
+  The only mainline-feasible path is to keep LK's panel/DSI/MDP3 scanout alive
+  with a `simple-framebuffer` node (the Acer t01 board does this at
+  `0x83201000`). The stock splash header is 720x1280 (`SPLASH!!`, likely RGBA
+  8888) and the stock reserved splash region is `0x83000000 + 0xc00000`, but
+  the exact LK framebuffer address still has to be confirmed; it cannot be
+  read back after a normal boot because the region is not reserved yet.
+  The backlight then needs `CONFIG_LEDS_QCOM_LPG` (the `qcom,pm8916-pwm` node)
+  plus `pwm-backlight`, since U-Boot deliberately leaves the LPG off.
 * **Audio/microphone**: the stock card is `msm8909-skue-snd-card` with the
-  internal "tombak" codec and the PM8909 WCD analog block at SPMI `0xf000`.
-  The MSM8909 LPASS/tombak digital side is not described by mainline; this
-  needs LPASS nodes, DSP firmware and a machine driver.
+  internal "tombak" codec and the PM8909 WCD analog block at SPMI `0xf000`
+  (`qcom,msm8x16_wcd_codec`). The MSM8909 LPASS/tombak digital side is not
+  described by mainline; this needs LPASS nodes, DSP firmware (the stock
+  `modem`/NON-HLOS image), a machine driver and UCM. The stock mixer paths are
+  in `/etc/mixer_paths_skue_t302.xml` inside the dump's `system.img`.
 * **ALS**: the Epticore EM3071x at `0x24` on QUP1 is enabled by a minimal
   local IIO driver (`patches/0003-em3071x-als.patch`) derived from the vendor
   driver. It reports a 12-bit ALS count and a nominal `raw * 10` lux; proximity
