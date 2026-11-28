@@ -269,11 +269,15 @@ static void watchdog_daemon(void)
 		int ret;
 
 		ret = poll(&pfd, 1, 1000);
-		if (ret > 0 && (pfd.revents & POLLIN)) {
-			char buf[64];
+		if (ret > 0) {
+			if (pfd.revents & POLLIN) {
+				char buf[64];
 
-			if (read(hb, buf, sizeof(buf)) > 0)
-				last = time(NULL);
+				if (read(hb, buf, sizeof(buf)) > 0)
+					last = time(NULL);
+			}
+			if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL))
+				usleep(200000);
 		}
 
 		now_beating = time(NULL) - last <= GKIW_WDT_HEARTBEAT;
