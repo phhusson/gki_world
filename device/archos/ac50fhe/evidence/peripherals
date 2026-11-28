@@ -49,3 +49,16 @@ in_illuminance_input = 10
 The chip ID register returns 0x31 and the ALS count is split over registers
 9/10; it only answers SMBus word reads, which is why the first byte-read probe
 returned EIO.
+
+Display (simple-framebuffer at LK's 0x83300000, PMIC LPG backlight):
+
+```text
+[drm] Initialized simpledrm 1.0.0 for 83300000.framebuffer on minor 0
+simple-framebuffer 83300000.framebuffer: [drm] fb0: simpledrmdrmfb frame buffer device
+gkiw: framebuffer test pattern drawn
+backlight brightness = 255
+```
+
+The initial 0x83201000 guess was zero; scanning the stock splash region showed
+LK's framebuffer at 0x83300000 (opaque black/gray pixels).  The initramfs fills
+`/dev/fb0` with colour bars so the panel visibly shows the framebuffer.

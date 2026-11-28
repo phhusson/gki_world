@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/fb.h>
 #include <linux/watchdog.h>
 #include <poll.h>
 #include <signal.h>
@@ -210,6 +211,48 @@ static void install_applets(void)
 }
 
 /*
+ * Paint vertical colour bars on /dev/fb0.  The second stage leaves the panel
+ * and MDP3 scanout running, so this is a visible proof that Linux owns the
+ * framebuffer even without a DRM/KMS driver for the display controller.
+ */
+static void fb_test_pattern(void)
+{
+	struct fb_fix_screeninfo fix;
+	struct fb_var_screeninfo var;
+	static const unsigned int colors[] = {
+		0xffffffff, 0xffffff00, 0xff00ffff, 0xff00ff00,
+		0xffff00ff, 0xffff0000, 0xff0000ff, 0xff000000,
+	};
+	unsigned char *fb;
+	int fd, x, y;
+
+	fd = open("/dev/fb0", O_RDWR);
+	if (fd < 0)
+		return;
+	if (ioctl(fd, FBIOGET_FSCREENINFO, &fix) ||
+	    ioctl(fd, FBIOGET_VSCREENINFO, &var)) {
+		close(fd);
+		return;
+	}
+	fb = mmap(NULL, fix.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (fb == MAP_FAILED) {
+		close(fd);
+		return;
+	}
+
+	for (y = 0; y < var.yres; y++) {
+		unsigned int *line = (unsigned int *)(fb + y * fix.line_length);
+
+		for (x = 0; x < var.xres; x++)
+			line[x] = colors[x * (sizeof(colors) / sizeof(colors[0])) / var.xres];
+	}
+
+	munmap(fb, fix.smem_len);
+	close(fd);
+	klog("gkiw: framebuffer test pattern drawn\n");
+}
+
+/*
  * Own /dev/watchdog and only ping it while heartbeats are arriving on the
  * second ACM port.  The kernel stops its own keepalive as soon as the device
  * is opened, so a host that stops pinging (harness crash, USB unplug, host
@@ -343,6 +386,13 @@ int main(void)
 	/* Start the watchdog owner before the shell takes over the console. */
 	if (fork() == 0) {
 		watchdog_daemon();
+		_exit(0);
+	}
+
+	/* Draw the bars once the VT/fbcon has settled. */
+	if (fork() == 0) {
+		sleep(3);
+		fb_test_pattern();
 		_exit(0);
 	}
 

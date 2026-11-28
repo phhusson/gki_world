@@ -43,16 +43,14 @@ phone resets about 60 s after every boot.
 
 ## Known gaps
 
-* **Display**: the stock kernel uses `qcom,mdss_mdp3` (MDP3). Mainline DRM has
-  MDP4/MDP5/DPU1 but no MDP3, so real modesetting is a large new subsystem.
-  The only mainline-feasible path is to keep LK's panel/DSI/MDP3 scanout alive
-  with a `simple-framebuffer` node (the Acer t01 board does this at
-  `0x83201000`). The stock splash header is 720x1280 (`SPLASH!!`, likely RGBA
-  8888) and the stock reserved splash region is `0x83000000 + 0xc00000`, but
-  the exact LK framebuffer address still has to be confirmed; it cannot be
-  read back after a normal boot because the region is not reserved yet.
-  The backlight then needs `CONFIG_LEDS_QCOM_LPG` (the `qcom,pm8916-pwm` node)
-  plus `pwm-backlight`, since U-Boot deliberately leaves the LPG off.
+* **Display**: the stock kernel uses `qcom,mdss_mdp3` (MDP3), which mainline
+  DRM does not implement. What works is a `simple-framebuffer` at LK's
+  framebuffer address (`0x83300000`, 720x1280, RGBA8888) with the MDSS clocks
+  and GDSC held on, plus the PM8909 LPG PWM backlight (`qcom,pm8916-pwm` and
+  `pwm-backlight`). The panel/DSI/MDP3 scanout must have been left running by
+  LK; there is no modesetting, GPU or brightness policy beyond the PWM. The
+  initramfs draws colour bars on `/dev/fb0` after boot as a visible check.
+  Real DRM/KMS (MDP3) remains a large future project.
 * **Audio/microphone**: the stock card is `msm8909-skue-snd-card` with the
   internal "tombak" codec and the PM8909 WCD analog block at SPMI `0xf000`
   (`qcom,msm8x16_wcd_codec`). The MSM8909 LPASS/tombak digital side is not
