@@ -15,6 +15,7 @@
 	model = "Archos 50f Helium";
 	compatible = "archos,ac50fhe", "qcom,msm8909";
 	chassis-type = "handset";
+
 };
 
 &{/reserved-memory} {
@@ -57,9 +58,91 @@
 	status = "okay";
 };
 
+&sdhc_1 {
+	status = "okay";
+};
+
 &usb_hs_phy {
 	/* v1p8/v3p3 supplies come from qcom-msm8909-pm8909.dtsi (L7/L13). */
 	extcon = <&pm8909_usbin>;
+};
+
+/* Volume Down is wired to the PMIC resin input. */
+&pm8909_resin {
+	linux,code = <KEY_VOLUMEDOWN>;
+	status = "okay";
+};
+
+/ {
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&gpio_keys_default>;
+
+		key-volume-up {
+			label = "Volume Up";
+			gpios = <&tlmm 90 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+			debounce-interval = <15>;
+			wakeup-source;
+		};
+	};
+};
+
+&tlmm {
+	gpio_keys_default: gpio-keys-default-state {
+		pins = "gpio90";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	touchscreen_default: touchscreen-default-state {
+		pins = "gpio12", "gpio13";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+
+	accel_int_default: accel-int-default-state {
+		pins = "gpio96";
+		function = "gpio";
+		drive-strength = <6>;
+		bias-pull-up;
+	};
+};
+
+&blsp_i2c1 {
+	status = "okay";
+
+	accelerometer@18 {
+		compatible = "bosch,bma222e";
+		reg = <0x18>;
+		vdd-supply = <&pm8909_l17>;
+		vddio-supply = <&pm8909_l6>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&accel_int_default>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <96 IRQ_TYPE_EDGE_FALLING>;
+	};
+};
+
+&blsp_i2c5 {
+	status = "okay";
+
+	touchscreen@38 {
+		compatible = "focaltech,ft6436";
+		reg = <0x38>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <13 IRQ_TYPE_EDGE_FALLING>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&touchscreen_default>;
+		reset-gpios = <&tlmm 12 GPIO_ACTIVE_LOW>;
+		vcc-supply = <&pm8909_l17>;
+		iovcc-supply = <&pm8909_l6>;
+		touchscreen-size-x = <480>;
+		touchscreen-size-y = <854>;
+	};
 };
 
 &smd_rpm_regulators {

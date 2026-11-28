@@ -26,6 +26,33 @@ populates its children. Without it the `qcom,pm8916-wdt` device is never
 created, so nothing pets the PMIC watchdog armed by the second stage and the
 phone resets about 60 s after every boot.
 
+## Storage and input
+
+* **eMMC**: `&sdhc_1` (8-bit, HS200) on the PM8909 L5/L8 rails. The stock
+  Android GPT is readable as `mmcblk0` with 29 partitions.
+* **Keys**: PMIC `pwrkey` (power) and `resin` (volume down, `KEY_VOLUMEDOWN`),
+  plus TLMM GPIO 90 as `gpio-keys` volume up (active low).
+* **Touchscreen**: FocalTech FT6436 at I2C address `0x38` on **BLSP1 QUP5**
+  (`0x78b9000`, GPIO 18/19), reset GPIO 12, IRQ GPIO 13, L17/L6 rails. The
+  stock QRD DTS puts a second touch node on QUP3; this board is on QUP5.
+  The mainline `edt-ft5x06` driver needs the `focaltech,ft6436` compatible and
+  probes it as `EP0110M09`.
+* **Accelerometer**: Bosch BMA222E (chip ID `0xf8`) at `0x18` on **BLSP1
+  QUP1** (`0x78b5000`, GPIO 6/7), interrupt GPIO 96, L17/L6 rails. The
+  `bma180` driver gets a BMA222E entry using the BMA250 register set.
+
+## Known gaps
+
+* **Display**: the stock kernel uses `qcom,mdss_mdp3` (MDP3) with an RM68191
+  QHD DSI panel. Mainline DRM has MDP4/MDP5/DPU1 but no MDP3, so a display
+  driver would be a large new subsystem rather than a DT change.
+* **Audio/microphone**: the stock card is `msm8909-skue-snd-card` with the
+  internal "tombak" codec and the PM8909 WCD analog block at SPMI `0xf000`.
+  The MSM8909 LPASS/tombak digital side is not described by mainline; this
+  needs LPASS nodes, DSP firmware and a machine driver.
+* **ALS/proximity**: the Epticore EM3071x at `0x24` on QUP1 has no mainline
+  driver and the vendor register map is not available from the stock DTB.
+
 ## USB console
 
 The USB PHY is driven by `ci_hdrc` in peripheral mode and the shared initramfs

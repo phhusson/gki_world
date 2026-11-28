@@ -220,7 +220,8 @@ static void watchdog_daemon(void)
 	unsigned int timeout = GKIW_WDT_TIMEOUT;
 	struct termios tio;
 	int beating = -1;
-	time_t last;
+	unsigned int heartbeats = 0;
+	time_t last, last_report;
 	int wdt, hb;
 	int i;
 
@@ -255,9 +256,11 @@ static void watchdog_daemon(void)
 	}
 
 	last = time(NULL);
+	last_report = last;
 
 	/* Reload the hardware timer with our timeout before waiting. */
-	ioctl(wdt, WDIOC_KEEPALIVE, 0);
+	if (ioctl(wdt, WDIOC_KEEPALIVE, 0))
+		klog("gkiw-wdt: initial keepalive failed: %s\n", strerror(errno));
 	klog("gkiw-wdt: %us timeout, heartbeat on %s\n", timeout, HBTTY);
 
 	for (;;) {
@@ -286,8 +289,17 @@ static void watchdog_daemon(void)
 			     now_beating ? "started" : "lost");
 			beating = now_beating;
 		}
-		if (now_beating)
-			ioctl(wdt, WDIOC_KEEPALIVE, 0);
+		if (now_beating) {
+			if (ioctl(wdt, WDIOC_KEEPALIVE, 0))
+				klog("gkiw-wdt: keepalive failed: %s\n",
+				     strerror(errno));
+			heartbeats++;
+		}
+		if (time(NULL) - last_report >= 10) {
+			klog("gkiw-wdt: %d heartbeats, %s\n", heartbeats,
+			     now_beating ? "beating" : "waiting");
+			last_report = time(NULL);
+		}
 	}
 }
 

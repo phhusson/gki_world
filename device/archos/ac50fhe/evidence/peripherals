@@ -1,0 +1,39 @@
+Linux peripheral bring-up evidence (kernel 6.18-rc6 + board DTS):
+
+```text
+[    0.580856] input: gpio-keys as /devices/platform/gpio-keys/input/input2
+[    0.858229] input: EP0110M09 as /devices/platform/soc@0/78b9000.i2c/i2c-1/1-0038/input/input3
+[    0.603940] mmc0: SDHCI controller on 7824900.sdhci [7824900.sdhci] using ADMA
+[    0.739903] mmc0: new HS200 MMC card at address 0001
+[    0.740982] mmcblk0: mmc0:0001 HBG4a2 29.1 GiB
+[    0.744196]  mmcblk0: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19 p20 p21 p22 p23 p24 p25 p26 p27 p28 p29
+```
+
+Input devices:
+
+```text
+N: Name="pm8941_pwrkey"   H: Handlers=kbd event0
+N: Name="pm8941_resin"    H: Handlers=kbd event1
+N: Name="gpio-keys"       H: Handlers=kbd event2
+N: Name="EP0110M09"       H: Handlers=event3
+```
+
+Accelerometer (`/sys/bus/iio/devices/iio:device0`, Bosch BMA222E, chip ID 0xf8):
+
+```text
+in_accel_x_raw = 4
+in_accel_y_raw = -8
+in_accel_z_raw = 252
+```
+
+The touch controller is on BLSP1 QUP5 (`0x78b9000`, GPIO 18/19), not QUP3 as
+the first reading of the stock QRD DTS suggested. The stock DTS itself has
+both an MStar and a FocalTech node on QUP5; the FT6436 answers as `EP0110M09`.
+
+Not enabled:
+
+* display: stock uses MDP3 (`qcom,mdss_mdp3`) + RM68191 QHD DSI; mainline
+  DRM has no MDP3 driver.
+* audio/mic: stock uses the internal "tombak" codec + PM8909 WCD analog block
+  at SPMI 0xf000; the MSM8909 LPASS/tombak path is not described in mainline.
+* ALS/proximity: Epticore EM3071x at 0x24 on QUP1, no mainline driver.

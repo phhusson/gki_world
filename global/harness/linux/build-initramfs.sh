@@ -29,8 +29,9 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/root/bin"
 
 "$CC" -static -O2 -o "$TMP/root/init" "$ROOT/global/harness/linux/init.c"
+"$CC" -static -O2 -o "$TMP/root/bin/gkiw-i2c" "$ROOT/global/harness/linux/gkiw-i2c.c"
 cp "$BUSYBOX" "$TMP/root/bin/busybox"
-chmod +x "$TMP/root/init" "$TMP/root/bin/busybox"
+chmod +x "$TMP/root/init" "$TMP/root/bin/gkiw-i2c" "$TMP/root/bin/busybox"
 
 mkdir -p "$(dirname "$OUT")"
 (cd "$TMP/root" && find . | cpio -o -H newc 2>/dev/null | gzip -9) > "$OUT"

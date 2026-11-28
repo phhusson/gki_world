@@ -7,6 +7,7 @@ sources:
     commit: d8595537cf7a
 patches:
   - patches/0001-msm8909-apcs-mailbox-and-pm8916-wdt-warm.patch
+  - patches/0002-touch-and-accel-ids.patch
 notes: >-
   The board tree and the reserved-memory/marker nodes are local.  The patch
   switches the MSM8909 SMD edge to the APCS mailbox, publishes the APCS regmap
