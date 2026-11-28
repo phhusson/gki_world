@@ -1,0 +1,13 @@
+schema: 1
+kind: kernel
+id: device/archos/ac50fhe/linux
+sources:
+  - repo: https://github.com/msm8916-mainline/linux
+    branch: wip/msm8916/6.18-rc6
+    commit: d8595537cf7a
+patches:
+  - patches/0001-msm8909-apcs-mailbox-and-pm8916-wdt-warm.patch
+notes: >-
+  The board tree and the reserved-memory/marker nodes are local.  The patch
+  carries the qcom-msm8909.dtsi mailbox tweak (attempted RPM fix) and the
+  pm8916_wdt warm-reset change so ramoops survives the PMIC watchdog.

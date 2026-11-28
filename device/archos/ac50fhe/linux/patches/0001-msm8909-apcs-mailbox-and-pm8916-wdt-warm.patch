@@ -1,0 +1,35 @@
+diff --git a/arch/arm/boot/dts/qcom/qcom-msm8909.dtsi b/arch/arm/boot/dts/qcom/qcom-msm8909.dtsi
+index 54732effd..d74cb4ac7 100644
+--- a/arch/arm/boot/dts/qcom/qcom-msm8909.dtsi
++++ b/arch/arm/boot/dts/qcom/qcom-msm8909.dtsi
+@@ -248,7 +248,7 @@ smd {
+ 
+ 		rpm {
+ 			interrupts = <GIC_SPI 168 IRQ_TYPE_EDGE_RISING>;
+-			qcom,ipc = <&apcs 8 0>;
++			mboxes = <&apcs 0>;
+ 			qcom,smd-edge = <15>;
+ 
+ 			rpm_requests: rpm-requests {
+@@ -1331,7 +1331,7 @@ intc: interrupt-controller@b000000 {
+ 		};
+ 
+ 		apcs: mailbox@b011000 {
+-			compatible = "qcom,msm8916-apcs-kpss-global", "syscon";
++			compatible = "qcom,msm8916-apcs-kpss-global";
+ 			reg = <0x0b011000 0x1000>;
+ 			#mbox-cells = <1>;
+ 			clocks = <&a7pll>, <&gcc GPLL0>;
+diff --git a/drivers/watchdog/pm8916_wdt.c b/drivers/watchdog/pm8916_wdt.c
+index 007ed139a..b70e73c05 100644
+--- a/drivers/watchdog/pm8916_wdt.c
++++ b/drivers/watchdog/pm8916_wdt.c
+@@ -212,7 +212,7 @@ static int pm8916_wdt_probe(struct platform_device *pdev)
+ 	/* Configure watchdog to hard-reset mode */
+ 	err = regmap_write(wdt->regmap,
+ 			   wdt->baseaddr + PON_PMIC_WD_RESET_S2_CTL,
+-			   RESET_TYPE_HARD);
++			   RESET_TYPE_WARM);
+ 	if (err) {
+ 		dev_err(dev, "failed configure watchdog\n");
+ 		return err;

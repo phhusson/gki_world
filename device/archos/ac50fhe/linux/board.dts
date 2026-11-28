@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Archos 50f Helium (AC50FHE), MSM8909.
+ *
+ * Minimal development tree: peripheral-mode USB (ChipIdea + ULPI PHY),
+ * the PM8909 regulators needed by the PHY, and ramoops for kernel logs.
+ * Storage, display and the modem are intentionally left disabled.
+ */
+
+/dts-v1/;
+
+#include "qcom-msm8909-pm8909.dtsi"
+
+/ {
+	model = "Archos 50f Helium";
+	compatible = "archos,ac50fhe", "qcom,msm8909";
+	chassis-type = "handset";
+
+	/*
+	 * LK leaves the PM8909 USB LDOs on.  Use fixed always-on supplies so
+	 * the ULPI PHY does not depend on the RPM regulator channel while the
+	 * SMD/RPM mailbox is still being brought up.
+	 */
+	usb_v1p8: regulator-usb-v1p8 {
+		compatible = "regulator-fixed";
+		regulator-name = "usb_v1p8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+	};
+
+	usb_v3p3: regulator-usb-v3p3 {
+		compatible = "regulator-fixed";
+		regulator-name = "usb_v3p3";
+		regulator-min-microvolt = <3075000>;
+		regulator-max-microvolt = <3075000>;
+		regulator-always-on;
+	};
+
+};
+
+&{/reserved-memory} {
+	ramoops@9d000000 {
+		compatible = "ramoops";
+		reg = <0x9d000000 0x100000>;
+		record-size = <0x20000>;
+		console-size = <0x60000>;
+		ftrace-size = <0x20000>;
+		pmsg-size = <0x20000>;
+		ecc-size = <16>;
+		no-map;
+	};
+
+	/* Mapped and reserved: the initramfs writes boot-progress markers here. */
+	gkiw_marker@9c000000 {
+		reg = <0x9c000000 0x1000>;
+	};
+};
+
+&pm8909_usbin {
+	status = "okay";
+};
+
+&usb {
+	extcon = <&pm8909_usbin>;
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
+&usb_hs_phy {
+	v1p8-supply = <&usb_v1p8>;
+	v3p3-supply = <&usb_v3p3>;
+	extcon = <&pm8909_usbin>;
+};
+
+&smd_rpm_regulators {
+	s2 {
+		regulator-min-microvolt = <1850000>;
+		regulator-max-microvolt = <1850000>;
+	};
+
+	l1 {
+		regulator-min-microvolt = <1000000>;
+		regulator-max-microvolt = <1000000>;
+	};
+
+	l2 {
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+	};
+
+	l4 {
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+	};
+
+	l5 {
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+	};
+
+	l6 {
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+	};
+
+	l7 {
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+	};
+
+	l8 {
+		regulator-min-microvolt = <2850000>;
+		regulator-max-microvolt = <2900000>;
+	};
+
+	l9 {
+		regulator-min-microvolt = <3000000>;
+		regulator-max-microvolt = <3300000>;
+	};
+
+	l10 {
+		regulator-min-microvolt = <1225000>;
+		regulator-max-microvolt = <1300000>;
+	};
+
+	l11 {
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <2950000>;
+		regulator-system-load = <200000>;
+		regulator-allow-set-load;
+	};
+
+	l12 {
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <2950000>;
+	};
+
+	l13 {
+		regulator-min-microvolt = <3075000>;
+		regulator-max-microvolt = <3075000>;
+	};
+
+	l14 {
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <3000000>;
+	};
+
+	l15 {
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <3000000>;
+	};
+
+	l17 {
+		regulator-min-microvolt = <2850000>;
+		regulator-max-microvolt = <2850000>;
+	};
+
+	l18 {
+		regulator-min-microvolt = <2700000>;
+		regulator-max-microvolt = <2700000>;
+	};
+};
